@@ -1,6 +1,6 @@
 {
   "name": "@luutuankiet/firefox-docker-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Firefox MCP with auto-screenshot on every mutation tool call",
   "type": "module",
   "main": "dist/index.js",
@@ -30,6 +30,10 @@
     "tsup": "8.5.0",
     "tsx": "4.21.0",
     "typescript": "5.3.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luutuankiet/firefox-docker-mcp"
   },
   "engines": {
     "node": ">=20.19.0"
