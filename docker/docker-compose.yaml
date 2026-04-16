@@ -1,0 +1,18 @@
+services:
+  firefox:
+    image: jlesage/firefox
+    container_name: firefox-mcp
+    network_mode: host
+    environment:
+      DISPLAY_WIDTH: "1920"
+      DISPLAY_HEIGHT: "1080"
+      FF_CUSTOM_ARGS: "--marionette"
+      FF_PREF_MARIONETTE_PORT: "marionette.port=2828"
+      FF_PREF_MARIONETTE_ENABLED: "marionette.enabled=true"
+      KEEP_APP_RUNNING: "1"
+    volumes:
+      - firefox-config:/config:rw
+    shm_size: "2g"
+
+volumes:
+  firefox-config:

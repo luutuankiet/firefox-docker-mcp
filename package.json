@@ -1,0 +1,36 @@
+{
+  "name": "firefox-docker-mcp",
+  "version": "0.1.0",
+  "description": "Firefox MCP with auto-screenshot on every mutation tool call",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "firefox-docker-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "geckodriver": "6.0.2",
+    "selenium-webdriver": "4.36.0",
+    "ws": "8.18.3",
+    "yargs": "17.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.1.0",
+    "@types/selenium-webdriver": "4.35.1",
+    "@types/ws": "8.18.1",
+    "@types/yargs": "17.0.32",
+    "tsup": "8.5.0",
+    "tsx": "4.21.0",
+    "typescript": "5.3.3"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}
