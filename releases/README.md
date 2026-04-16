@@ -15,4 +15,5 @@ The `publish.yml` workflow reads `releases/${{ github.ref_name }}.md` via
 ## Index
 | Version | Date | Theme |
 |---|---|---|
+| [v0.1.1](./v0.1.1.md) | 2026-04-16 | CI pipeline test + infra polish |
 | [v0.1.0](./v0.1.0.md) | 2026-04-16 | Initial release: shared browser with auto-screenshot |
