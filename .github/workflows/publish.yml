@@ -50,7 +50,7 @@ jobs:
             exit 1
           fi
           echo "Found $NOTES_FILE ($(wc -l < $NOTES_FILE) lines)"
-      - name: Create GitHub Release from narrative notes
+      - name: Create GitHub Release from narrative notes file
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
