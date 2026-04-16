@@ -38,7 +38,7 @@ Open `http://localhost:5800` in your browser — you should see Firefox.
 ### 2. Run the MCP server
 
 ```bash
-npx firefox-docker-mcp --connect-existing --marionette-port 2828
+npx @luutuankiet/firefox-docker-mcp --connect-existing --marionette-port 2828
 ```
 
 ### 3. Configure your MCP client
