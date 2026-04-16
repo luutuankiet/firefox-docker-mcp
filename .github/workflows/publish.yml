@@ -1,0 +1,86 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ($TAG_VERSION) != package.json ($PKG_VERSION). Bump version before tagging."
+            exit 1
+          fi
+      - run: npm pack --dry-run
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: "*.tgz"
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release notes file exists
+        run: |
+          NOTES_FILE="releases/${{ github.ref_name }}.md"
+          if [ ! -f "$NOTES_FILE" ]; then
+            echo "::error::Missing $NOTES_FILE. Every tag needs a hand-written narrative entry."
+            echo "::error::See releases/README.md for the authoring pattern."
+            exit 1
+          fi
+          echo "Found $NOTES_FILE ($(wc -l < $NOTES_FILE) lines)"
+      - name: Create GitHub Release from narrative notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes-file "releases/${{ github.ref_name }}.md"
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [build, release]
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - name: Determine npm dist-tag
+        id: dist-tag
+        run: |
+          TAG="${GITHUB_REF_NAME:-manual}"
+          if [[ "$TAG" =~ -dev\. ]]; then
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" =~ -(rc|beta|alpha)\. ]]; then
+            echo "tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish to npm (OIDC provenance)
+        run: npx -y npm@latest publish --access public --provenance --tag ${{ steps.dist-tag.outputs.tag }}
