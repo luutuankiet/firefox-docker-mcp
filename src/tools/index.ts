@@ -118,3 +118,14 @@ export {
   handleUninstallExtension,
   handleListExtensions,
 } from './webextension.js';
+
+// DOM query / scroll / recording tools (v0.2.0 max-access set)
+export { queryDomTool, handleQueryDom } from './query-dom.js';
+export { scrollPageTool, handleScrollPage } from './scroll.js';
+export {
+  startRecordingTool,
+  stopRecordingTool,
+  handleStartRecording,
+  handleStopRecording,
+  isRecording,
+} from './recording.js';

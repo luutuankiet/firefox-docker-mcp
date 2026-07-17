@@ -1,6 +1,6 @@
 {
   "name": "@luutuankiet/firefox-docker-mcp",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Firefox MCP with auto-screenshot on every mutation tool call",
   "type": "module",
   "main": "dist/index.js",
@@ -18,12 +18,15 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
     "geckodriver": "6.0.2",
+    "gifenc": "^1.0.3",
+    "pngjs": "^7.0.0",
     "selenium-webdriver": "4.36.0",
     "ws": "8.18.3",
     "yargs": "17.7.2"
   },
   "devDependencies": {
     "@types/node": "24.1.0",
+    "@types/pngjs": "^6.0.5",
     "@types/selenium-webdriver": "4.35.1",
     "@types/ws": "8.18.1",
     "@types/yargs": "17.0.32",

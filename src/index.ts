@@ -199,6 +199,12 @@ const toolHandlers = new Map<string, (input: unknown) => Promise<McpToolResponse
   ['screenshot_page', tools.handleScreenshotPage],
   ['screenshot_by_uid', tools.handleScreenshotByUid],
 
+  // DOM query / scroll / recording (v0.2.0 max-access set)
+  ['query_dom', tools.handleQueryDom],
+  ['scroll_page', tools.handleScrollPage],
+  ['start_recording', tools.handleStartRecording],
+  ['stop_recording', tools.handleStopRecording],
+
   // Utilities
   ['accept_dialog', tools.handleAcceptDialog],
   ['dismiss_dialog', tools.handleDismissDialog],
@@ -263,6 +269,12 @@ const allTools = [
   // Screenshot
   tools.screenshotPageTool,
   tools.screenshotByUidTool,
+
+  // DOM query / scroll / recording (v0.2.0 max-access set)
+  tools.queryDomTool,
+  tools.scrollPageTool,
+  tools.startRecordingTool,
+  tools.stopRecordingTool,
 
   // Utilities
   tools.acceptDialogTool,
@@ -344,6 +356,7 @@ async function main() {
     'dismiss_dialog',
     'navigate_history',
     'set_viewport_size',
+    'scroll_page',
   ]);
 
   // Handle tool execution
@@ -360,7 +373,7 @@ async function main() {
       const result = await handler(args);
 
       // Auto-append screenshot after successful mutation tools
-      if (MUTATION_TOOLS.has(name) && !result.isError) {
+      if (MUTATION_TOOLS.has(name) && !result.isError && !tools.isRecording()) {
         try {
           const ff = await getFirefox();
           const base64Png = await ff.takeScreenshotPage();

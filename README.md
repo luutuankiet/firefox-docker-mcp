@@ -86,6 +86,18 @@ These tools return their normal text result **plus** a screenshot:
 
 All other tools (standalone screenshot, DOM snapshot, console, network, etc.) work identically to upstream. Full tool reference: [firefox-devtools-mcp docs](https://github.com/mozilla/firefox-devtools-mcp#readme).
 
+### Added Tools (v0.2.0)
+
+Token-efficient inspection + motion capture, built for agents that need to reconstruct page state faithfully rather than just snapshot it:
+
+| Tool | Action |
+|------|--------|
+| `query_dom` | Query the DOM with CSS selectors — 9 modes (`outline`, `text`, `html`, `outer`, `attr`, `styles`, `table`, `count`, `json`). Returns raw structure (e.g. SVG `tspan` / `foreignObject`) that `take_snapshot` collapses. |
+| `scroll_page` | Scroll the viewport or a target element (`top` / `bottom` / `by` / element). Returns scroll metrics plus a screenshot. |
+| `evaluate_script` | Execute arbitrary JavaScript in the page context. **Requires `--enable-script`** (off by default). |
+| `start_recording` | Begin a screenshot-polled screen recording — buffers frames in memory and suppresses per-call screenshots while active. Auto-stops at the frame cap or a duration cap. |
+| `stop_recording` | Stop the recording — writes PNG frames + an animated GIF to `~/.firefox-devtools-mcp/recordings/<timestamp>/` and returns evenly-sampled frames inline. |
+
 ## Use Cases
 
 - **Frontend verification loop** — Agent edits code, tunnels local dev server to the browser, navigates to it, screenshots to confirm the change looks right
