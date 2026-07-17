@@ -15,6 +15,7 @@ The `publish.yml` workflow reads `releases/${{ github.ref_name }}.md` via
 ## Index
 | Version | Date | Theme |
 |---|---|---|
+| [v0.5.0](./v0.5.0.md) | 2026-07-18 | Readiness-gated screenshots, app-shell scrolling, compact responses, page_info |
 | [v0.4.0](./v0.4.0.md) | 2026-07-18 | Self-managing connections: takeover on connect + idle auto-exit on the bridge |
 | [v0.3.0](./v0.3.0.md) | 2026-07-17 | Host-network bridge: browse any remote host's localhost (P2P, zero-ingress) |
 | [v0.2.0](./v0.2.0.md) | 2026-07-17 | Max access: query_dom, scroll_page, evaluate_script, screen recording |

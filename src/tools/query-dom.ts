@@ -16,7 +16,7 @@ import type { McpToolResponse } from '../types/common.js';
 export const queryDomTool = {
   name: 'query_dom',
   description:
-    'Query/aggregate the live page DOM token-efficiently. modes: outline (structure map, default when no selector), text, html, outer, attr, styles, table, count, json. Orient with outline then drill via a selector. outer on ".mermaid-block svg" returns the raw SVG markup that take_snapshot collapses into prose.',
+    'Query/aggregate the live page DOM token-efficiently. modes: outline (structure map, default when no selector), text, html, outer, attr, styles, table, count, json. Orient with outline then drill via a selector. outer on ".mermaid-block svg" returns the raw SVG markup that take_snapshot collapses into prose. Output is compact JSON; use omitAttrs to drop noisy attributes (e.g. class, style).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -32,6 +32,12 @@ export const queryDomTool = {
       attr: {
         type: 'string',
         description: 'For mode=attr: attribute name, "*" for all, or a comma-separated list.',
+      },
+      omitAttrs: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Attribute names to omit from attrs output in attr/json modes (e.g. ["class","style"] to cut Tailwind noise).',
       },
       styleProps: {
         type: 'array',
@@ -68,6 +74,7 @@ const limit = typeof p.limit === 'number' ? p.limit : 10;
 const maxChars = typeof p.maxChars === 'number' ? p.maxChars : 4000;
 const strip = Array.isArray(p.strip) ? p.strip : ['script', 'style'];
 const maxDepth = typeof p.maxDepth === 'number' ? p.maxDepth : 3;
+const omit = Array.isArray(p.omitAttrs) ? p.omitAttrs : [];
 let truncated = false;
 
 function trunc(s) {
@@ -146,7 +153,7 @@ for (let i = 0; i < els.length; i++) {
     const spec = p.attr || '*';
     const a = {};
     if (spec === '*') {
-      if (el.attributes) for (let k = 0; k < el.attributes.length; k++) a[el.attributes[k].name] = el.attributes[k].value;
+      if (el.attributes) for (let k = 0; k < el.attributes.length; k++) { const n = el.attributes[k].name; if (omit.indexOf(n) === -1) a[n] = el.attributes[k].value; }
     } else {
       const names = spec.split(',').map(function (s) { return s.trim(); });
       names.forEach(function (n) { a[n] = el.getAttribute(n); });
@@ -169,12 +176,10 @@ for (let i = 0; i < els.length; i++) {
     }
     entry.headers = headers; entry.rows = rows;
   } else if (mode === 'json') {
-    const cls = classesOf(el);
     const a = {};
-    if (el.attributes) for (let k = 0; k < el.attributes.length; k++) a[el.attributes[k].name] = el.attributes[k].value;
+    if (el.attributes) for (let k = 0; k < el.attributes.length; k++) { const n = el.attributes[k].name; if (omit.indexOf(n) === -1) a[n] = el.attributes[k].value; }
     const r = trunc(normText(el));
     entry.id = el.id || undefined;
-    entry.classes = cls.length ? cls : undefined;
     entry.attrs = a;
     entry.text = r.v; if (r.t) { entry.truncated = true; truncated = true; }
     entry.nChildren = el.children ? el.children.length : 0;
@@ -198,13 +203,11 @@ export async function handleQueryDom(args: unknown): Promise<McpToolResponse> {
 
     let output: string;
     if (typeof raw === 'string') {
-      try {
-        output = '```json\n' + JSON.stringify(JSON.parse(raw), null, 2) + '\n```';
-      } catch {
-        output = raw;
-      }
+      // The injected script already returns compact JSON — pass it through.
+      // Re-parsing + pretty-printing doubled the token cost for no gain.
+      output = raw;
     } else {
-      output = '```json\n' + JSON.stringify(raw, null, 2) + '\n```';
+      output = JSON.stringify(raw);
     }
 
     return successResponse(truncateText(output, TOKEN_LIMITS.MAX_RESPONSE_CHARS));

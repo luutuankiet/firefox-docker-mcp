@@ -1,6 +1,6 @@
 {
   "name": "@luutuankiet/firefox-bridge",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Zero-ingress P2P bridge that exposes a remote host's localhost to the firefox-docker-mcp browser over HyperDHT",
   "type": "module",
   "bin": {

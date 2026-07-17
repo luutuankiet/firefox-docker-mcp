@@ -38,6 +38,7 @@ import { parseArguments, parsePrefs } from './cli.js';
 import { FirefoxDevTools } from './firefox/index.js';
 import type { FirefoxLaunchOptions } from './firefox/types.js';
 import * as tools from './tools/index.js';
+import { waitForVisualReady } from './utils/visual-ready.js';
 import type { McpToolResponse } from './types/common.js';
 
 // Export for direct usage in scripts
@@ -202,6 +203,7 @@ const toolHandlers = new Map<string, (input: unknown) => Promise<McpToolResponse
   // DOM query / scroll / recording (v0.2.0 max-access set)
   ['query_dom', tools.handleQueryDom],
   ['scroll_page', tools.handleScrollPage],
+  ['page_info', tools.handlePageInfo],
   ['start_recording', tools.handleStartRecording],
   ['stop_recording', tools.handleStopRecording],
 
@@ -281,6 +283,7 @@ const allTools = [
   // DOM query / scroll / recording (v0.2.0 max-access set)
   tools.queryDomTool,
   tools.scrollPageTool,
+  tools.pageInfoTool,
   tools.startRecordingTool,
   tools.stopRecordingTool,
 
@@ -372,6 +375,10 @@ async function main() {
     'scroll_page',
   ]);
 
+  // Max ms the auto-screenshot waits for visual readiness (0 = disabled).
+  // Captured here because `args` is shadowed inside the CallTool handler.
+  const screenshotWaitMs = Math.max(0, Number(args.screenshotWaitMs ?? 8000) || 0);
+
   // Handle tool execution
   server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
     const { name, arguments: args } = request.params;
@@ -389,9 +396,18 @@ async function main() {
       if (MUTATION_TOOLS.has(name) && !result.isError && !tools.isRecording()) {
         try {
           const ff = await getFirefox();
+          let waitNote: string | null = null;
+          try {
+            waitNote = await waitForVisualReady(ff.getDriver(), screenshotWaitMs);
+          } catch {
+            // Never block the screenshot on the readiness probe
+          }
           const base64Png = await ff.takeScreenshotPage();
           if (base64Png && typeof base64Png === 'string') {
             const content = Array.isArray(result.content) ? result.content : [];
+            if (waitNote) {
+              content.push({ type: 'text' as const, text: waitNote });
+            }
             content.push({
               type: 'image' as const,
               data: base64Png,

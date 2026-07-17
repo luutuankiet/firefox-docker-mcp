@@ -112,7 +112,9 @@ export function jsonResponse(data: unknown): McpToolResponse {
     content: [
       {
         type: 'text',
-        text: JSON.stringify(data, null, 2),
+        // Compact on purpose: pretty-printing roughly doubles line count and
+        // token cost for zero information gain when an LLM is the consumer.
+        text: JSON.stringify(data),
       },
     ],
   };

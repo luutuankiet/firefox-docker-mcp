@@ -137,3 +137,4 @@ export {
   handleConnectHostNetwork,
   handleDisconnectHostNetwork,
 } from './bridge.js';
+export { pageInfoTool, handlePageInfo } from './page-info.js';

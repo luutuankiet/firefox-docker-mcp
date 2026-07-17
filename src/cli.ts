@@ -145,6 +145,12 @@ export const cliOptions = {
       "Enable host-network bridge tools (connect/disconnect_host_network) that tunnel the browser to a remote host's localhost via the firefox-bridge P2P transport. Requires --enable-privileged-context.",
     default: (process.env.ENABLE_BRIDGE ?? 'false') === 'true',
   },
+  screenshotWaitMs: {
+    type: 'number',
+    description:
+      'Max milliseconds the auto-screenshot middleware waits for visual readiness (document loaded, body visible, viewport images decoded) before capturing. 0 disables the wait. On timeout the screenshot is taken anyway with a note about what was still pending.',
+    default: Number(process.env.FIREFOX_SCREENSHOT_WAIT_MS ?? '8000'),
+  },
 } satisfies Record<string, YargsOptions>;
 
 export function parseArguments(version: string, argv = process.argv) {

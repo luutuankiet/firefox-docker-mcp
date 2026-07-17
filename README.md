@@ -94,7 +94,8 @@ Token-efficient inspection + motion capture, built for agents that need to recon
 | Tool | Action |
 |------|--------|
 | `query_dom` | Query the DOM with CSS selectors — 9 modes (`outline`, `text`, `html`, `outer`, `attr`, `styles`, `table`, `count`, `json`). Returns raw structure (e.g. SVG `tspan` / `foreignObject`) that `take_snapshot` collapses. |
-| `scroll_page` | Scroll the viewport or a target element (`top` / `bottom` / `by` / element). Returns scroll metrics plus a screenshot. |
+| `scroll_page` | Scroll the viewport or a target element (`top` / `bottom` / `by` / element). Falls back to the largest inner scrollable container on app-shell layouts and names the scroller it drove. Returns scroll metrics plus a screenshot. |
+| `page_info` | Page ground truth: URL, title, readyState, viewport, pending viewport images, body visibility, frames, scrollable containers. Cheap text-only diagnostic. |
 | `evaluate_script` | Execute arbitrary JavaScript in the page context. **Requires `--enable-script`** (off by default). |
 | `start_recording` | Begin a screenshot-polled screen recording — buffers frames in memory and suppresses per-call screenshots while active. Auto-stops at the frame cap or a duration cap. |
 | `stop_recording` | Stop the recording — writes PNG frames + an animated GIF to `~/.firefox-devtools-mcp/recordings/<timestamp>/` and returns evenly-sampled frames inline. |
