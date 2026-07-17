@@ -6,7 +6,8 @@ services:
     environment:
       DISPLAY_WIDTH: "1920"
       DISPLAY_HEIGHT: "1080"
-      FF_CUSTOM_ARGS: "--marionette"
+      FF_CUSTOM_ARGS: "--marionette --remote-debugging-port 9222"
+      MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: "1"
       FF_PREF_MARIONETTE_PORT: "marionette.port=2828"
       FF_PREF_MARIONETTE_ENABLED: "marionette.enabled=true"
       KEEP_APP_RUNNING: "1"

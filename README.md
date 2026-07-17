@@ -53,7 +53,8 @@ Add to your MCP client config (e.g. Claude Code `settings.json`):
       "args": [
         "firefox-docker-mcp",
         "--connect-existing",
-        "--marionette-port", "2828"
+        "--marionette-port", "2828",
+        "--enable-priviledged-context"
       ]
     }
   }
