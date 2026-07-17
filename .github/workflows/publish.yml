@@ -27,6 +27,11 @@ jobs:
             echo "::error::Tag ($TAG_VERSION) != package.json ($PKG_VERSION). Bump version before tagging."
             exit 1
           fi
+          BRIDGE_VERSION=$(node -p "require('./packages/firefox-bridge/package.json').version")
+          if [ "$TAG_VERSION" != "$BRIDGE_VERSION" ]; then
+            echo "::error::Tag ($TAG_VERSION) != packages/firefox-bridge ($BRIDGE_VERSION). Bump BOTH packages before tagging."
+            exit 1
+          fi
       - run: npm pack --dry-run
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -83,4 +88,32 @@ jobs:
             echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
       - name: Publish to npm (OIDC provenance)
+        run: npx -y npm@latest publish --access public --provenance --tag ${{ steps.dist-tag.outputs.tag }}
+
+  publish-bridge:
+    runs-on: ubuntu-latest
+    needs: [build, release]
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No build/ci: packages/firefox-bridge is plain ESM and publishes the
+      # `files` glob (src + README). hyperdht is a runtime dep for consumers only.
+      - name: Determine npm dist-tag
+        id: dist-tag
+        run: |
+          TAG="${GITHUB_REF_NAME:-manual}"
+          if [[ "$TAG" =~ -dev\. ]]; then
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" =~ -(rc|beta|alpha)\. ]]; then
+            echo "tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish @luutuankiet/firefox-bridge (OIDC provenance)
+        working-directory: packages/firefox-bridge
         run: npx -y npm@latest publish --access public --provenance --tag ${{ steps.dist-tag.outputs.tag }}

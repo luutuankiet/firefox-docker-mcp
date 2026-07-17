@@ -129,3 +129,11 @@ export {
   handleStopRecording,
   isRecording,
 } from './recording.js';
+
+// Host-network bridge tools (v0.3.0) - requires --enable-bridge
+export {
+  connectHostNetworkTool,
+  disconnectHostNetworkTool,
+  handleConnectHostNetwork,
+  handleDisconnectHostNetwork,
+} from './bridge.js';

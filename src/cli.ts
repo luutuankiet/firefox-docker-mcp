@@ -139,6 +139,12 @@ export const cliOptions = {
       'Enable privileged context tools: list/select privileged contexts, evaluate privileged scripts, get/set Firefox prefs, and list extensions. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.',
     default: (process.env.ENABLE_PRIVILEGED_CONTEXT ?? 'false') === 'true',
   },
+  enableBridge: {
+    type: 'boolean',
+    description:
+      "Enable host-network bridge tools (connect/disconnect_host_network) that tunnel the browser to a remote host's localhost via the firefox-bridge P2P transport. Requires --enable-privileged-context.",
+    default: (process.env.ENABLE_BRIDGE ?? 'false') === 'true',
+  },
 } satisfies Record<string, YargsOptions>;
 
 export function parseArguments(version: string, argv = process.argv) {

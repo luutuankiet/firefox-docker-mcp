@@ -14,7 +14,7 @@ export default defineConfig([
     dts: false,
     platform: 'node',
     splitting: false,
-    external: ['selenium-webdriver'],
+    external: ['selenium-webdriver', 'hyperdht'],
     noExternal: ['@modelcontextprotocol/sdk', 'zod', 'dotenv'],
   },
   // Injected snapshot script (browser context)

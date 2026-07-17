@@ -1,0 +1,37 @@
+{
+  "name": "@luutuankiet/firefox-bridge",
+  "version": "0.3.0",
+  "description": "Zero-ingress P2P bridge that exposes a remote host's localhost to the firefox-docker-mcp browser over HyperDHT",
+  "type": "module",
+  "bin": {
+    "firefox-bridge": "./src/cli.js"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node src/cli.js",
+    "smoke": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "hyperdht": "^6.33.0"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luutuankiet/firefox-docker-mcp",
+    "directory": "packages/firefox-bridge"
+  },
+  "keywords": [
+    "hyperdht",
+    "p2p",
+    "socks5",
+    "tunnel",
+    "firefox",
+    "mcp"
+  ],
+  "license": "MIT"
+}

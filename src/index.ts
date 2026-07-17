@@ -234,6 +234,14 @@ const toolHandlers = new Map<string, (input: unknown) => Promise<McpToolResponse
         ['list_extensions', tools.handleListExtensions],
       ] as const)
     : []),
+
+  // Host-network bridge tools — requires --enable-bridge
+  ...(args.enableBridge
+    ? ([
+        ['connect_host_network', tools.handleConnectHostNetwork],
+        ['disconnect_host_network', tools.handleDisconnectHostNetwork],
+      ] as const)
+    : []),
 ]);
 
 // All tool definitions
@@ -304,6 +312,11 @@ const allTools = [
         tools.getFirefoxPrefsTool,
         tools.listExtensionsTool,
       ]
+    : []),
+
+  // Host-network bridge tools — requires --enable-bridge
+  ...(args.enableBridge
+    ? [tools.connectHostNetworkTool, tools.disconnectHostNetworkTool]
     : []),
 ];
 

@@ -15,6 +15,7 @@ The `publish.yml` workflow reads `releases/${{ github.ref_name }}.md` via
 ## Index
 | Version | Date | Theme |
 |---|---|---|
+| [v0.3.0](./v0.3.0.md) | 2026-07-17 | Host-network bridge: browse any remote host's localhost (P2P, zero-ingress) |
 | [v0.2.0](./v0.2.0.md) | 2026-07-17 | Max access: query_dom, scroll_page, evaluate_script, screen recording |
 | [v0.1.2](./v0.1.2.md) | 2026-04-16 | Fix OIDC provenance publish |
 | [v0.1.1](./v0.1.1.md) | 2026-04-16 | CI pipeline test + infra polish |
