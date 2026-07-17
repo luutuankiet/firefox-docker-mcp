@@ -247,10 +247,12 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
         duration: req.timings?.duration,
       }));
 
-      return successResponse(
-        `📡 ${requests.length} requests${hasMore ? ` (limit ${limit})` : ''}\n` +
-          JSON.stringify(minData, null, 2)
-      );
+      return jsonResponse({
+        total: requests.length,
+        showing: minData.length,
+        hasMore: hasMore,
+        requests: minData,
+      });
     } else {
       // Full JSON including headers - apply truncation to prevent token overflow
       const fullData = limitedRequests.map((req) => ({
@@ -266,10 +268,12 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
         responseHeaders: truncateHeaders(req.responseHeaders),
       }));
 
-      return successResponse(
-        `📡 ${requests.length} requests${hasMore ? ` (limit ${limit})` : ''}\n` +
-          JSON.stringify(fullData, null, 2)
-      );
+      return jsonResponse({
+        total: requests.length,
+        showing: fullData.length,
+        hasMore: hasMore,
+        requests: fullData,
+      });
     }
   } catch (error) {
     return errorResponse(error instanceof Error ? error : new Error(String(error)));
@@ -339,7 +343,7 @@ export async function handleGetNetworkRequest(args: unknown): Promise<McpToolRes
       return jsonResponse(details);
     }
 
-    return successResponse(JSON.stringify(details, null, 2));
+    return jsonResponse(details);
   } catch (error) {
     return errorResponse(error instanceof Error ? error : new Error(String(error)));
   }

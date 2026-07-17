@@ -108,7 +108,7 @@ export function errorResponse(error: Error | string): McpToolResponse {
 }
 
 export function jsonResponse(data: unknown): McpToolResponse {
-  return {
+  const response: McpToolResponse = {
     content: [
       {
         type: 'text',
@@ -118,4 +118,11 @@ export function jsonResponse(data: unknown): McpToolResponse {
       },
     ],
   };
+  // Native structured result — escape-free for clients that support MCP
+  // structured output; they render the object and drop the text fallback.
+  // The spec requires an object, so arrays/primitives stay text-only.
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    response.structuredContent = data as Record<string, unknown>;
+  }
+  return response;
 }

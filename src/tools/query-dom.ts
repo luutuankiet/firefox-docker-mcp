@@ -201,16 +201,25 @@ export async function handleQueryDom(args: unknown): Promise<McpToolResponse> {
     await driver.manage().setTimeouts({ script: 10000 });
     const raw = await driver.executeScript(QUERY_DOM_SCRIPT, params);
 
-    let output: string;
-    if (typeof raw === 'string') {
-      // The injected script already returns compact JSON — pass it through.
-      // Re-parsing + pretty-printing doubled the token cost for no gain.
-      output = raw;
-    } else {
-      output = JSON.stringify(raw);
-    }
+    // The injected script already returns compact JSON — pass it through.
+    // Re-parsing + pretty-printing doubled the token cost for no gain.
+    const output = typeof raw === 'string' ? raw : JSON.stringify(raw);
+    const response = successResponse(truncateText(output, TOKEN_LIMITS.MAX_RESPONSE_CHARS));
 
-    return successResponse(truncateText(output, TOKEN_LIMITS.MAX_RESPONSE_CHARS));
+    // Native structured result — escape-free for clients that support MCP
+    // structured output. Skipped when the payload was truncated: attaching
+    // the full object would bypass the response token cap.
+    if (output.length <= TOKEN_LIMITS.MAX_RESPONSE_CHARS) {
+      try {
+        const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          response.structuredContent = parsed as Record<string, unknown>;
+        }
+      } catch {
+        // Non-JSON script output — text fallback only
+      }
+    }
+    return response;
   } catch (error) {
     return errorResponse(error as Error);
   }

@@ -164,9 +164,11 @@ export async function handleEvaluatePrivilegedScript(args: unknown): Promise<Mcp
             ? 'null'
             : result === undefined
               ? 'undefined'
-              : JSON.stringify(result, null, 2);
+              : JSON.stringify(result);
 
-      return successResponse(`🔧 Result:\n${resultText}`);
+      const response = successResponse(`🔧 Result: ${resultText}`);
+      response.structuredContent = { result: result === undefined ? null : result };
+      return response;
     } catch (executeError) {
       return errorResponse(
         new Error(

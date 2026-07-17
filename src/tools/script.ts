@@ -144,13 +144,11 @@ export async function handleEvaluateScript(args: unknown): Promise<McpToolRespon
     // Execute with resolved args (empty array if no args)
     const result = await driver.executeScript(evalCode, ...resolvedArgs);
 
-    // Format output
-    let output = 'Script ran on page and returned:\n';
-    output += '```json\n';
-    output += JSON.stringify(result, null, 2);
-    output += '\n```';
-
-    return successResponse(output);
+    // Compact text fallback + native structured result (escape-free for
+    // clients that support MCP structured output)
+    const response = successResponse('Script ran on page and returned: ' + JSON.stringify(result));
+    response.structuredContent = { result: result === undefined ? null : result };
+    return response;
   } catch (error) {
     const errorMsg = (error as Error).message;
 

@@ -75,7 +75,18 @@ export async function handlePageInfo(_args: unknown): Promise<McpToolResponse> {
 
     await driver.manage().setTimeouts({ script: 5000 });
     const raw = await driver.executeScript(PAGE_INFO_SCRIPT);
-    return successResponse(typeof raw === 'string' ? raw : JSON.stringify(raw));
+    const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+    const response = successResponse(text);
+    // Native structured result — escape-free for clients that support it
+    try {
+      const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        response.structuredContent = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Text fallback only
+    }
+    return response;
   } catch (error) {
     return errorResponse(error as Error);
   }
