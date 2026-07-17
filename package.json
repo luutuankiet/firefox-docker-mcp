@@ -1,6 +1,6 @@
 {
   "name": "@luutuankiet/firefox-docker-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Firefox MCP with auto-screenshot on every mutation tool call",
   "type": "module",
   "main": "dist/index.js",

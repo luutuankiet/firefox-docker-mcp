@@ -1,10 +1,12 @@
 /**
- * Host-network bridge tools (v0.3.0) - requires --enable-bridge.
+ * Host-network bridge tools (v0.4.0) - requires --enable-bridge.
  *
  * connect_host_network: point the browser's SOCKS proxy at a local dumb-pipe
  * listener that tunnels over HyperDHT to a remote `firefox-bridge` running the
  * same shared secret. The browser's localhost becomes the remote host's
- * localhost. One bridge at a time.
+ * localhost. Reconnecting while a bridge is active performs a TAKEOVER: the
+ * new tunnel is established and verified first, then the old one is torn down
+ * and its resources cleaned up automatically.
  *
  * disconnect_host_network: tear down the tunnel and restore the proxy prefs
  * that were captured at connect time.
@@ -59,7 +61,7 @@ let connecting = false;
 export const connectHostNetworkTool = {
   name: 'connect_host_network',
   description:
-    "Bridge the browser to a remote host's localhost via the firefox-bridge P2P tunnel. Points Firefox's SOCKS proxy at a local listener that tunnels to the remote bridge running the same shared secret, so the browser's localhost becomes the remote host's localhost. One bridge at a time. Requires --enable-bridge and --enable-privileged-context.",
+    "Bridge the browser to a remote host's localhost via the firefox-bridge P2P tunnel. Points Firefox's SOCKS proxy at a local listener that tunnels to the remote bridge running the same shared secret, so the browser's localhost becomes the remote host's localhost. If a bridge is already active, this call TAKES OVER: the new tunnel is established and verified first, then the old one is closed and its resources cleaned up - no disconnect_host_network needed in between. Requires --enable-bridge and --enable-privileged-context.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -79,11 +81,9 @@ export const connectHostNetworkTool = {
 };
 
 export async function handleConnectHostNetwork(args: unknown): Promise<McpToolResponse> {
-  if (activeBridge || connecting) {
+  if (connecting) {
     return errorResponse(
-      new Error(
-        `A bridge is already active${activeBridge?.name ? ` (${activeBridge.name})` : ''}. Call disconnect_host_network first - one bridge at a time.`
-      )
+      new Error('Another connect_host_network call is already in flight. Retry in a moment.')
     );
   }
   connecting = true;
@@ -95,8 +95,16 @@ export async function handleConnectHostNetwork(args: unknown): Promise<McpToolRe
       );
     }
 
-    // Capture the baseline BEFORE flipping so disconnect restores it exactly.
-    const baseline = await readProxyPrefs(PROXY_PREFS);
+    // Takeover: remember the currently active bridge (if any). The NEW tunnel
+    // is established and verified first; the old one is torn down only after
+    // the browser has been repointed, so a failed takeover leaves the existing
+    // bridge fully intact.
+    const previous = activeBridge;
+
+    // Baseline: reuse the one captured before the FIRST bridge. During a
+    // takeover the live prefs point at the outgoing bridge's SOCKS port - NOT
+    // the user's real settings - so re-reading them here would poison restore.
+    const baseline = previous ? previous.baseline : await readProxyPrefs(PROXY_PREFS);
 
     // startBridgeClient probes reachability first; a wrong secret or an offline
     // remote throws here, before we touch any browser prefs.
@@ -112,21 +120,40 @@ export async function handleConnectHostNetwork(args: unknown): Promise<McpToolRe
       });
     } catch (err) {
       // A partial pref flip would leave the browser half-proxied to a dead
-      // endpoint. Best-effort restore the captured baseline before bailing.
+      // endpoint. Best-effort: repoint at the still-running previous bridge
+      // during a takeover, else restore the captured baseline.
       try {
-        await applyProxyPrefs(baselineToRestore(baseline));
+        if (previous) {
+          await applyProxyPrefs({
+            'network.proxy.type': 1,
+            'network.proxy.socks': previous.client.socksHost,
+            'network.proxy.socks_port': previous.client.socksPort,
+            'network.proxy.socks_remote_dns': true,
+            'network.proxy.allow_hijacking_localhost': true,
+          });
+        } else {
+          await applyProxyPrefs(baselineToRestore(baseline));
+        }
       } catch {
         // ignore restore failure; original error is more important
       }
-      await client.close();
+      await client.close().catch(() => {});
       throw err;
     }
 
     activeBridge = { client, baseline, name };
 
+    // Browser now routes through the new tunnel; the old one is unreferenced.
+    // Torn down last so a takeover never leaves the browser without a bridge.
+    if (previous) {
+      await previous.client.close().catch(() => {});
+    }
+
     return successResponse(
       [
-        `🌉 Bridge connected${name ? ` to ${name}` : ''}.`,
+        previous
+          ? `🌉 Bridge takeover complete${name ? ` -> ${name}` : ''} (previous bridge${previous.name ? ` ${previous.name}` : ''} closed, resources cleaned up).`
+          : `🌉 Bridge connected${name ? ` to ${name}` : ''}.`,
         `Browser SOCKS proxy -> 127.0.0.1:${client.socksPort} -> (P2P) -> remote host.`,
         "The browser's localhost is now the remote host's localhost. Navigate to http://localhost:<port> to reach the remote dev app.",
         'Call disconnect_host_network to tear it down and restore proxy settings.',

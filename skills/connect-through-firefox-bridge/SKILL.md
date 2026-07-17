@@ -63,11 +63,15 @@ DNS and `localhost` resolve on YOUR host, so `http://localhost:3000`,
 disconnect_host_network   (no arguments)
 ```
 This restores the browser's original proxy settings and tears the tunnel down.
-Then stop the `npx @luutuankiet/firefox-bridge` process on your host (Ctrl-C).
+Then stop the `npx @luutuankiet/firefox-bridge` process on your host (Ctrl-C) -
+or just walk away: since v0.4.0 it auto-exits after 30 minutes with no live
+connections (`--idle-timeout <min>`, `0` disables).
 
 ## Rules & gotchas
-- **One bridge at a time.** If a bridge is already active, `connect_host_network`
-  errors - call `disconnect_host_network` first.
+- **Reconnect = takeover (v0.4.0+).** If a bridge is already active,
+  `connect_host_network` establishes and verifies the NEW tunnel first, then
+  closes the old one automatically - no `disconnect_host_network` needed in
+  between. If the new connect fails, the old bridge stays intact.
 - **Same secret both ends.** Identity is derived entirely from the secret; a
   mismatch simply won't connect (no partial/insecure state).
 - **Always disconnect.** While connected, the browser routes localhost traffic
@@ -77,7 +81,9 @@ Then stop the `npx @luutuankiet/firefox-bridge` process on your host (Ctrl-C).
   serve from cache. Add a cache-busting query (`?t=123`) to force a real request
   when verifying the tunnel is down.
 - **The bridge process must stay up** for the duration - it's the exit point on
-  your host.
+  your host. It self-terminates after 30 idle minutes and hard-caps at 4 hours
+  total by default (bandwidth guard); pass `--idle-timeout 0` /
+  `--max-lifetime 0` for marathon sessions.
 
 ## Mental model
 ```
