@@ -39,6 +39,7 @@ import { FirefoxDevTools } from './firefox/index.js';
 import type { FirefoxLaunchOptions } from './firefox/types.js';
 import * as tools from './tools/index.js';
 import { waitForVisualReady } from './utils/visual-ready.js';
+import { setNavTimeoutMs, DEFAULT_NAV_TIMEOUT_MS } from './utils/nav-watchdog.js';
 import type { McpToolResponse } from './types/common.js';
 
 // Export for direct usage in scripts
@@ -378,6 +379,10 @@ async function main() {
   // Max ms the auto-screenshot waits for visual readiness (0 = disabled).
   // Captured here because `args` is shadowed inside the CallTool handler.
   const screenshotWaitMs = Math.max(0, Number(args.screenshotWaitMs ?? 8000) || 0);
+
+  // Bound the document-unloading commands so a modal the driver cannot reach
+  // fails fast with a diagnostic instead of hanging every tool in the process.
+  setNavTimeoutMs(Number(args.navTimeoutMs ?? DEFAULT_NAV_TIMEOUT_MS));
 
   // Handle tool execution
   server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {

@@ -99,8 +99,11 @@ export async function handleSetFirefoxPrefs(args: unknown): Promise<McpToolRespo
     } finally {
       // Restore previous context (skip if already on the right chrome context)
       try {
+        // Unconditional: skipping this when the session had no remembered
+        // content context stranded the driver in chrome scope, after which
+        // every content tool failed with "Only supported in content context".
+        await driver.setContext('content');
         if (originalContextId && originalContextId !== chromeContextId) {
-          await driver.setContext('content');
           await driver.switchTo().window(originalContextId);
         }
       } catch {
@@ -195,7 +198,11 @@ export async function handleGetFirefoxPrefs(args: unknown): Promise<McpToolRespo
               }
             })()
           `;
-          const prefResult = (await driver.executeScript(`return ${script}`)) as {
+          // script.trim() matters: the template starts with a newline, and
+          // `return` followed by a line break gets a semicolon inserted, so the
+          // untrimmed form returned undefined and every read failed downstream
+          // with "Cannot read properties of null".
+          const prefResult = (await driver.executeScript(`return ${script.trim()}`)) as {
             exists: boolean;
             value?: unknown;
           };
@@ -224,8 +231,11 @@ export async function handleGetFirefoxPrefs(args: unknown): Promise<McpToolRespo
     } finally {
       // Restore previous context (skip if already on the right chrome context)
       try {
+        // Unconditional: skipping this when the session had no remembered
+        // content context stranded the driver in chrome scope, after which
+        // every content tool failed with "Only supported in content context".
+        await driver.setContext('content');
         if (originalContextId && originalContextId !== chromeContextId) {
-          await driver.setContext('content');
           await driver.switchTo().window(originalContextId);
         }
       } catch {

@@ -3,6 +3,8 @@
  */
 
 import { successResponse, errorResponse } from '../utils/response-helpers.js';
+import { ensureUnloadPromptsDisabled } from '../utils/unload-guard.js';
+import { withNavigationWatchdog, getNavTimeoutMs } from '../utils/nav-watchdog.js';
 import type { McpToolResponse } from '../types/common.js';
 
 // Tool definitions
@@ -130,7 +132,10 @@ export async function handleNewPage(args: unknown): Promise<McpToolResponse> {
     const { getFirefox } = await import('../index.js');
     const firefox = await getFirefox();
 
-    const newIdx = await firefox.createNewPage(url);
+    await ensureUnloadPromptsDisabled(firefox);
+    const newIdx = await withNavigationWatchdog(`new_page → ${url}`, getNavTimeoutMs(), () =>
+      firefox.createNewPage(url)
+    );
 
     return successResponse(`✅ new page [${newIdx}] → ${url}`);
   } catch (error) {
@@ -159,7 +164,10 @@ export async function handleNavigatePage(args: unknown): Promise<McpToolResponse
       throw new Error('No page selected');
     }
 
-    await firefox.navigate(url);
+    await ensureUnloadPromptsDisabled(firefox);
+    await withNavigationWatchdog(`navigate_page → ${url}`, getNavTimeoutMs(), () =>
+      firefox.navigate(url)
+    );
 
     return successResponse(`✅ [${selectedIdx}] → ${url}`);
   } catch (error) {
@@ -239,7 +247,10 @@ export async function handleClosePage(args: unknown): Promise<McpToolResponse> {
       throw new Error(`Page with index ${pageIdx} not found`);
     }
 
-    await firefox.closeTab(pageIdx);
+    await ensureUnloadPromptsDisabled(firefox);
+    await withNavigationWatchdog(`close_page [${pageIdx}]`, getNavTimeoutMs(), () =>
+      firefox.closeTab(pageIdx)
+    );
 
     return successResponse(`✅ closed [${pageIdx}]`);
   } catch (error) {

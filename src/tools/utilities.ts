@@ -125,13 +125,14 @@ export async function handleNavigateHistory(args: unknown): Promise<McpToolRespo
     }
 
     const { getFirefox } = await import('../index.js');
+    const { ensureUnloadPromptsDisabled } = await import('../utils/unload-guard.js');
+    const { withNavigationWatchdog, getNavTimeoutMs } = await import('../utils/nav-watchdog.js');
     const firefox = await getFirefox();
 
-    if (direction === 'back') {
-      await firefox.navigateBack();
-    } else {
-      await firefox.navigateForward();
-    }
+    await ensureUnloadPromptsDisabled(firefox);
+    await withNavigationWatchdog(`navigate_history ${direction}`, getNavTimeoutMs(), () =>
+      direction === 'back' ? firefox.navigateBack() : firefox.navigateForward()
+    );
 
     return successResponse(`✅ ${direction}`);
   } catch (error) {

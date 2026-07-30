@@ -151,6 +151,12 @@ export const cliOptions = {
       'Max milliseconds the auto-screenshot middleware waits for visual readiness (document loaded, body visible, viewport images decoded) before capturing. 0 disables the wait. On timeout the screenshot is taken anyway with a note about what was still pending.',
     default: Number(process.env.FIREFOX_SCREENSHOT_WAIT_MS ?? '8000'),
   },
+  navTimeoutMs: {
+    type: 'number',
+    description:
+      'Max milliseconds a document-unloading command (navigate_page, new_page, close_page, navigate_history) may run before failing with a diagnostic. Guards against a modal the driver cannot reach hanging the whole server. 0 disables the watchdog.',
+    default: Number(process.env.FIREFOX_NAV_TIMEOUT_MS ?? '20000'),
+  },
 } satisfies Record<string, YargsOptions>;
 
 export function parseArguments(version: string, argv = process.argv) {
