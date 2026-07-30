@@ -12,6 +12,19 @@ Append-only narrative release notes for `firefox-docker-mcp`.
 The `publish.yml` workflow reads `releases/${{ github.ref_name }}.md` via
 `gh release create --notes-file` when a tag is pushed. Missing file = workflow fails loudly.
 
+**Cut a release with `npm version patch|minor|major` — never bump by hand.** The `version`
+lifecycle hook runs `scripts/sync-release-version.mjs`, which syncs
+`packages/firefox-bridge/package.json` to the same version and aborts if this directory has
+no `vX.Y.Z.md` for it. Both are hard requirements of `publish.yml`: the build job asserts the
+tag matches **both** package.json files, and the release job needs the notes file. The hook
+runs before npm commits or tags, so a failure leaves nothing to clean up.
+
+```
+# write releases/vX.Y.Z.md + add the index row FIRST, then:
+npm version patch
+git push && git push --tags
+```
+
 ## Index
 | Version | Date | Theme |
 |---|---|---|
