@@ -5,12 +5,14 @@
 
 import { successResponse, errorResponse } from '../utils/response-helpers.js';
 import { handleUidError } from '../utils/uid-helpers.js';
+import { onTabOrFocused } from '../utils/tab-routing.js';
 import type { McpToolResponse } from '../types/common.js';
 
 // Tool definitions
 export const clickByUidTool = {
   name: 'click_by_uid',
-  description: 'Click element by UID. Set dblClick for double-click.',
+  description:
+    'Click element by UID. Runs on your own tab in the background, so it does not disturb what is on screen.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -29,7 +31,7 @@ export const clickByUidTool = {
 
 export const hoverByUidTool = {
   name: 'hover_by_uid',
-  description: 'Hover over element by UID.',
+  description: 'Hover over element by UID. Runs in the background on your own tab.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -44,7 +46,8 @@ export const hoverByUidTool = {
 
 export const fillByUidTool = {
   name: 'fill_by_uid',
-  description: 'Fill text input/textarea by UID.',
+  description:
+    'Fill text input/textarea by UID, typing as a person would. Runs in the background on your own tab.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -63,7 +66,8 @@ export const fillByUidTool = {
 
 export const dragByUidToUidTool = {
   name: 'drag_by_uid_to_uid',
-  description: 'Drag element to another (HTML5 drag events).',
+  description:
+    'Drag element to another (HTML5 drag events). Runs in the background on your own tab.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -82,7 +86,7 @@ export const dragByUidToUidTool = {
 
 export const fillFormByUidTool = {
   name: 'fill_form_by_uid',
-  description: 'Fill multiple form fields at once.',
+  description: 'Fill multiple form fields at once. Runs in the background on your own tab.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -111,7 +115,8 @@ export const fillFormByUidTool = {
 
 export const uploadFileByUidTool = {
   name: 'upload_file_by_uid',
-  description: 'Upload file to file input by UID.',
+  description:
+    'Upload file to file input by UID. The path is read by the browser, so it must exist inside the browser container. Runs in the background on your own tab.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -131,7 +136,7 @@ export const uploadFileByUidTool = {
 // Handlers
 export async function handleClickByUid(args: unknown): Promise<McpToolResponse> {
   try {
-    const { uid, dblClick } = args as { uid: string; dblClick?: boolean };
+    const { uid, dblClick, tab } = args as { uid: string; dblClick?: boolean; tab?: string };
 
     if (!uid || typeof uid !== 'string') {
       throw new Error('uid parameter is required and must be a string');
@@ -141,7 +146,12 @@ export async function handleClickByUid(args: unknown): Promise<McpToolResponse> 
     const firefox = await getFirefox();
 
     try {
-      await firefox.clickByUid(uid, dblClick);
+      await onTabOrFocused(
+        firefox,
+        tab,
+        (tabId) => firefox.clickUidInTab(tabId, uid, dblClick),
+        () => firefox.clickByUid(uid, dblClick)
+      );
       return successResponse(`✅ ${dblClick ? 'dblclick' : 'click'} ${uid}`);
     } catch (error) {
       throw handleUidError(error as Error, uid);
@@ -153,7 +163,7 @@ export async function handleClickByUid(args: unknown): Promise<McpToolResponse> 
 
 export async function handleHoverByUid(args: unknown): Promise<McpToolResponse> {
   try {
-    const { uid } = args as { uid: string };
+    const { uid, tab } = args as { uid: string; tab?: string };
 
     if (!uid || typeof uid !== 'string') {
       throw new Error('uid parameter is required and must be a string');
@@ -163,7 +173,12 @@ export async function handleHoverByUid(args: unknown): Promise<McpToolResponse> 
     const firefox = await getFirefox();
 
     try {
-      await firefox.hoverByUid(uid);
+      await onTabOrFocused(
+        firefox,
+        tab,
+        (tabId) => firefox.hoverUidInTab(tabId, uid),
+        () => firefox.hoverByUid(uid)
+      );
       return successResponse(`✅ hover ${uid}`);
     } catch (error) {
       throw handleUidError(error as Error, uid);
@@ -175,7 +190,7 @@ export async function handleHoverByUid(args: unknown): Promise<McpToolResponse> 
 
 export async function handleFillByUid(args: unknown): Promise<McpToolResponse> {
   try {
-    const { uid, value } = args as { uid: string; value: string };
+    const { uid, value, tab } = args as { uid: string; value: string; tab?: string };
 
     if (!uid || typeof uid !== 'string') {
       throw new Error('uid parameter is required and must be a string');
@@ -189,7 +204,12 @@ export async function handleFillByUid(args: unknown): Promise<McpToolResponse> {
     const firefox = await getFirefox();
 
     try {
-      await firefox.fillByUid(uid, value);
+      await onTabOrFocused(
+        firefox,
+        tab,
+        (tabId) => firefox.fillUidInTab(tabId, uid, value),
+        () => firefox.fillByUid(uid, value)
+      );
       return successResponse(`✅ fill ${uid}`);
     } catch (error) {
       throw handleUidError(error as Error, uid);
@@ -201,7 +221,7 @@ export async function handleFillByUid(args: unknown): Promise<McpToolResponse> {
 
 export async function handleDragByUidToUid(args: unknown): Promise<McpToolResponse> {
   try {
-    const { fromUid, toUid } = args as { fromUid: string; toUid: string };
+    const { fromUid, toUid, tab } = args as { fromUid: string; toUid: string; tab?: string };
 
     if (!fromUid || typeof fromUid !== 'string') {
       throw new Error('fromUid parameter is required and must be a string');
@@ -215,7 +235,12 @@ export async function handleDragByUidToUid(args: unknown): Promise<McpToolRespon
     const firefox = await getFirefox();
 
     try {
-      await firefox.dragByUidToUid(fromUid, toUid);
+      await onTabOrFocused(
+        firefox,
+        tab,
+        (tabId) => firefox.dragUidToUidInTab(tabId, fromUid, toUid),
+        () => firefox.dragByUidToUid(fromUid, toUid)
+      );
       return successResponse(`✅ drag ${fromUid}→${toUid}`);
     } catch (error) {
       // Check both UIDs for staleness
@@ -232,7 +257,10 @@ export async function handleDragByUidToUid(args: unknown): Promise<McpToolRespon
 
 export async function handleFillFormByUid(args: unknown): Promise<McpToolResponse> {
   try {
-    const { elements } = args as { elements: Array<{ uid: string; value: string }> };
+    const { elements, tab } = args as {
+      elements: Array<{ uid: string; value: string }>;
+      tab?: string;
+    };
 
     if (!elements || !Array.isArray(elements) || elements.length === 0) {
       throw new Error('elements parameter is required and must be a non-empty array');
@@ -252,7 +280,12 @@ export async function handleFillFormByUid(args: unknown): Promise<McpToolRespons
     const firefox = await getFirefox();
 
     try {
-      await firefox.fillFormByUid(elements);
+      await onTabOrFocused(
+        firefox,
+        tab,
+        (tabId) => firefox.fillFormUidInTab(tabId, elements),
+        () => firefox.fillFormByUid(elements)
+      );
       return successResponse(`✅ filled ${elements.length} fields`);
     } catch (error) {
       const errorMsg = (error as Error).message;
@@ -268,7 +301,7 @@ export async function handleFillFormByUid(args: unknown): Promise<McpToolRespons
 
 export async function handleUploadFileByUid(args: unknown): Promise<McpToolResponse> {
   try {
-    const { uid, filePath } = args as { uid: string; filePath: string };
+    const { uid, filePath, tab } = args as { uid: string; filePath: string; tab?: string };
 
     if (!uid || typeof uid !== 'string') {
       throw new Error('uid parameter is required and must be a string');
@@ -282,7 +315,12 @@ export async function handleUploadFileByUid(args: unknown): Promise<McpToolRespo
     const firefox = await getFirefox();
 
     try {
-      await firefox.uploadFileByUid(uid, filePath);
+      await onTabOrFocused(
+        firefox,
+        tab,
+        (tabId) => firefox.uploadFileUidInTab(tabId, uid, filePath),
+        () => firefox.uploadFileByUid(uid, filePath)
+      );
       return successResponse(`✅ upload ${uid}`);
     } catch (error) {
       const errorMsg = (error as Error).message;

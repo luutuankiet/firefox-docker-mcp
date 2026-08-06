@@ -10,6 +10,23 @@ import { ConsoleEvents, NetworkEvents } from './events/index.js';
 import { DomInteractions } from './dom.js';
 import { PageManagement } from './pages.js';
 import { SnapshotManager, type Snapshot, type SnapshotOptions } from './snapshot/index.js';
+import {
+  navigateInContext,
+  callFunctionInContext,
+  screenshotContext,
+  waitForContextReady,
+} from './bidi-ops.js';
+import {
+  findElementRef,
+  clickElementRef,
+  hoverElementRef,
+  fillElementRef,
+  dragElementRefs,
+  prepareFileInputRef,
+  setFilesOnElementRef,
+  screenshotElementRef,
+  settleAfterAction,
+} from './bidi-input.js';
 
 /**
  * Main Firefox Client facade
@@ -36,13 +53,15 @@ export class FirefoxClient {
     const driver = this.core.getDriver();
 
     // Initialize snapshot manager first
-    this.snapshot = new SnapshotManager(driver);
+    this.snapshot = new SnapshotManager(driver, this.bidi);
 
     // Create centralized navigation handler for lifecycle hooks
-    const onNavigate = () => {
-      // Clear snapshot on any navigation
+    const onNavigate = (contextId?: string) => {
+      // A page that navigated has replaced the elements its snapshot named, so
+      // those uids are gone. Every other tab's uids are still good, and clearing
+      // them too is what used to break agents that were never on this page.
       if (this.snapshot) {
-        this.snapshot.clear();
+        this.snapshot.clear(contextId);
       }
     };
 
@@ -74,7 +93,9 @@ export class FirefoxClient {
     this.pages = new PageManagement(
       driver,
       () => this.core.getCurrentContextId(),
-      (id: string) => this.core.setCurrentContextId(id)
+      (id: string) => this.core.setCurrentContextId(id),
+      (method: string, params: Record<string, any> = {}) =>
+        this.core.sendBiDiCommand(method, params)
     );
 
     // Subscribe to console and network events for ALL contexts (not just current).
@@ -229,7 +250,108 @@ export class FirefoxClient {
     }
     await this.pages.navigate(url);
     // Clear snapshot on navigation (but NOT console - users can manually clear if needed)
-    this.clearSnapshot();
+    this.clearSnapshot(await this.focusedTabId());
+  }
+
+  // ============================================================================
+  // Tab-targeted operations
+  //
+  // These name the tab they act on instead of acting on whichever tab is
+  // focused, so concurrent callers stop fighting over the foreground and a
+  // person watching the browser keeps their view. Each throws when the browser
+  // cannot address tabs this way; callers fall back to the classic methods.
+  // ============================================================================
+
+  private bidi = (method: string, params: Record<string, any> = {}): Promise<any> =>
+    this.core.sendBiDiCommand(method, params);
+
+  /**
+   * Which tab the browser is currently showing.
+   *
+   * The tracked id is authoritative once anything has selected a tab; asking
+   * the driver covers the window between connecting and the first selection,
+   * when nothing has recorded one yet.
+   */
+  private async focusedTabId(): Promise<string> {
+    return this.core.getCurrentContextId() ?? (await this.core.getDriver().getWindowHandle());
+  }
+
+  async navigateInTab(tabId: string, url: string): Promise<void> {
+    await navigateInContext(this.bidi, tabId, url);
+    this.clearSnapshot(tabId);
+  }
+
+  async evaluateInTab(tabId: string, functionDeclaration: string): Promise<unknown> {
+    return await callFunctionInContext(this.bidi, tabId, functionDeclaration);
+  }
+
+  async screenshotTab(tabId: string): Promise<string> {
+    return await screenshotContext(this.bidi, tabId);
+  }
+
+  async waitForTabReady(tabId: string, timeoutMs: number): Promise<string | null> {
+    return await waitForContextReady(this.bidi, tabId, timeoutMs);
+  }
+
+  /**
+   * Turn a snapshot uid into a reference the browser can act on, in a named tab.
+   *
+   * The uid layer holds selectors in memory, so this costs one call into the
+   * page and never consults the focused driver.
+   */
+  private async uidRefInTab(tabId: string, uid: string): Promise<string> {
+    if (!this.snapshot) {
+      throw new Error('Not connected');
+    }
+    const { css, xpath } = this.snapshot.resolveUidToLocators(uid);
+    return await findElementRef(this.bidi, tabId, css, xpath);
+  }
+
+  async clickUidInTab(tabId: string, uid: string, dblClick = false): Promise<void> {
+    const ref = await this.uidRefInTab(tabId, uid);
+    await clickElementRef(this.bidi, tabId, ref, dblClick);
+    await settleAfterAction();
+  }
+
+  async hoverUidInTab(tabId: string, uid: string): Promise<void> {
+    const ref = await this.uidRefInTab(tabId, uid);
+    await hoverElementRef(this.bidi, tabId, ref);
+    await settleAfterAction();
+  }
+
+  async fillUidInTab(tabId: string, uid: string, value: string): Promise<void> {
+    const ref = await this.uidRefInTab(tabId, uid);
+    await fillElementRef(this.bidi, tabId, ref, value);
+    await settleAfterAction();
+  }
+
+  async dragUidToUidInTab(tabId: string, fromUid: string, toUid: string): Promise<void> {
+    const fromRef = await this.uidRefInTab(tabId, fromUid);
+    const toRef = await this.uidRefInTab(tabId, toUid);
+    await dragElementRefs(this.bidi, tabId, fromRef, toRef);
+    await settleAfterAction();
+  }
+
+  async fillFormUidInTab(
+    tabId: string,
+    elements: Array<{ uid: string; value: string }>
+  ): Promise<void> {
+    // Sequential because each field can reveal or reshape the next one.
+    for (const { uid, value } of elements) {
+      await this.fillUidInTab(tabId, uid, value);
+    }
+  }
+
+  async uploadFileUidInTab(tabId: string, uid: string, filePath: string): Promise<void> {
+    const ref = await this.uidRefInTab(tabId, uid);
+    await prepareFileInputRef(this.bidi, tabId, ref);
+    await setFilesOnElementRef(this.bidi, tabId, ref, filePath);
+    await settleAfterAction();
+  }
+
+  async screenshotUidInTab(tabId: string, uid: string): Promise<string> {
+    const ref = await this.uidRefInTab(tabId, uid);
+    return await screenshotElementRef(this.bidi, tabId, ref);
   }
 
   async navigateBack(): Promise<void> {
@@ -309,6 +431,48 @@ export class FirefoxClient {
     return await this.pages.closeTab(index);
   }
 
+  indexOfTab(tabId: string): number {
+    if (!this.pages) {
+      throw new Error('Not connected');
+    }
+    return this.pages.indexOfTab(tabId);
+  }
+
+  async selectTabById(tabId: string): Promise<void> {
+    if (!this.pages) {
+      throw new Error('Not connected');
+    }
+    return await this.pages.selectTabById(tabId);
+  }
+
+  async closeTabById(tabId: string): Promise<void> {
+    if (!this.pages) {
+      throw new Error('Not connected');
+    }
+    return await this.pages.closeTabById(tabId);
+  }
+
+  async createNewPageWithId(url: string): Promise<{ tabId: string; index: number }> {
+    if (!this.pages) {
+      throw new Error('Not connected');
+    }
+    return await this.pages.createNewPageWithId(url);
+  }
+
+  async createNewPageInBackground(url: string): Promise<{ tabId: string; index: number }> {
+    if (!this.pages) {
+      throw new Error('Not connected');
+    }
+    return await this.pages.createNewPageInBackground(url);
+  }
+
+  async closeTabInBackground(tabId: string): Promise<void> {
+    if (!this.pages) {
+      throw new Error('Not connected');
+    }
+    await this.pages.closeTabInBackground(tabId);
+  }
+
   // ============================================================================
   // Network
   // ============================================================================
@@ -357,7 +521,14 @@ export class FirefoxClient {
     if (!this.snapshot) {
       throw new Error('Not connected');
     }
-    return await this.snapshot.takeSnapshot(options);
+    return await this.snapshot.takeSnapshot(await this.focusedTabId(), options);
+  }
+
+  async takeSnapshotInTab(tabId: string, options?: SnapshotOptions): Promise<Snapshot> {
+    if (!this.snapshot) {
+      throw new Error('Not connected');
+    }
+    return await this.snapshot.takeSnapshotInTab(tabId, options);
   }
 
   resolveUidToSelector(uid: string): string {
@@ -374,11 +545,11 @@ export class FirefoxClient {
     return await this.snapshot.resolveUidToElement(uid);
   }
 
-  clearSnapshot(): void {
+  clearSnapshot(tabId?: string): void {
     if (!this.snapshot) {
       throw new Error('Not connected');
     }
-    this.snapshot.clear();
+    this.snapshot.clear(tabId);
   }
 
   // ============================================================================

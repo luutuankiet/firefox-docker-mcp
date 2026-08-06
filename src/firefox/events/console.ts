@@ -12,7 +12,7 @@ const CONSOLE_TTL_MS = 5 * 60 * 1000; // 5 minutes TTL for old messages
 
 export interface ConsoleEventsOptions {
   /** Callback triggered on navigation events (for auto-clear) */
-  onNavigate?: () => void;
+  onNavigate?: (contextId?: string) => void;
   /** Auto-clear console on navigation (default: false - changed to prevent losing logs) */
   autoClearOnNavigate?: boolean;
 }
@@ -61,12 +61,15 @@ export class ConsoleEvents {
         // Handle console messages
         if (payload?.method === 'log.entryAdded') {
           const entry = payload.params;
-          const message: ConsoleMessage = {
+          // The tab a message came from is what lets a reply carry the console
+          // output of the page it acted on rather than every page at once.
+          const message: ConsoleMessage & { context?: string } = {
             level: (entry.level as ConsoleMessage['level']) || 'info',
             text: entry.text || (entry.args ? JSON.stringify(entry.args) : ''),
             timestamp: entry.timestamp || Date.now(),
             source: entry.source?.realm,
             args: entry.args,
+            context: entry.source?.context,
           };
           this.consoleMessages.push(message);
           logDebug(`Console [${message.level}]: ${message.text}`);
@@ -81,7 +84,9 @@ export class ConsoleEvents {
             this.clearMessages();
           }
           if (this.options.onNavigate) {
-            this.options.onNavigate();
+            // Which page navigated decides whose page state is now wrong; without
+            // it every tab has to be treated as having navigated.
+            this.options.onNavigate(payload.params?.context);
           }
         }
       } catch {

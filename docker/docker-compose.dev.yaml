@@ -1,0 +1,104 @@
+# Dev stack -- entirely separate from docker-compose.yaml (prod), which is
+# host-networked and speaks MCP over stdio from the host. Distinct container
+# names, distinct volume, distinct published ports. Nothing here touches prod.
+#
+# Shape: Firefox owns the network namespace and the MCP server joins it.
+# Marionette only ever binds 127.0.0.1 and offers no rebind knob, so sharing a
+# namespace is what makes an HTTP-fronted MCP server possible at all.
+#
+# Consequence of that shape: only the namespace *owner* may declare `dns:` and
+# `ports:`. Docker hard-errors ("conflicting options: dns and the network
+# mode") if a joining container sets DNS, and published ports belong to the
+# owner. So both live on the firefox service even though the MCP port is bound
+# by the mcp service.
+
+# MUST stay set. Compose derives the project name from the compose file's
+# directory, so without this the dev stack lands in the same project as
+# docker-compose.yaml. Both files declare a service called `firefox`, and
+# Compose then treats the running prod container as this project's `firefox`
+# service and REPLACES it. An explicit project name is the only thing keeping
+# the two stacks apart.
+name: firefox-dev
+
+services:
+  firefox:
+    image: jlesage/firefox
+    container_name: firefox-dev
+    environment:
+      DISPLAY_WIDTH: "1920"
+      DISPLAY_HEIGHT: "1080"
+      # Automation flags are parameterised so the container can be recreated
+      # without them -- Google and other identity providers refuse sign-in on a
+      # browser running under Marionette/remote-debugging. See ff-takeover.sh.
+      #
+      # Note the SINGLE dash in ${VAR-default}: it falls back to the default
+      # only when VAR is entirely unset. With `:-` an explicitly empty value
+      # would be replaced by the default, which is exactly what takeover mode
+      # needs to set.
+      FF_CUSTOM_ARGS: "${FF_DEV_CUSTOM_ARGS---marionette --remote-debugging-port 9222}"
+      MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: "1"
+      FF_PREF_MARIONETTE_PORT: "marionette.port=2828"
+      FF_PREF_MARIONETTE_ENABLED: "marionette.enabled=${FF_DEV_MARIONETTE:-true}"
+      KEEP_APP_RUNNING: "1"
+    volumes:
+      - firefox-dev-config:/config:rw
+    shm_size: "2g"
+    ports:
+      # MCP streamable-HTTP endpoint. Bound by the mcp service; published here
+      # because this service owns the namespace.
+      - "8931:8931"
+      # noVNC and raw VNC, offset from 5800/5900 so they cannot collide with
+      # the host-networked prod container.
+      - "5810:5800"
+      - "5910:5900"
+    # MagicDNS MUST come first. Docker's embedded resolver only advances to the
+    # next server on SERVFAIL, and 1.1.1.1 answers *.ts.net with an
+    # authoritative NXDOMAIN -- reverse these and every tailnet name silently
+    # stops resolving. 1.1.1.1 is required because MagicDNS SERVFAILs public
+    # names on this tailnet.
+    dns:
+      - 100.100.100.100
+      - 1.1.1.1
+    # Docker defaults to ndots:0, which treats bare names as fully qualified and
+    # never appends the MagicDNS search domain.
+    dns_opt:
+      - ndots:1
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    container_name: firefox-dev-mcp
+    depends_on:
+      - firefox
+    # Joins Firefox's namespace to reach Marionette on 127.0.0.1:2828.
+    # Because of this: no `dns:`, no `ports:` on this service.
+    network_mode: "service:firefox"
+    volumes:
+      # Live source. Dev loop is: `npm run build` on the host, then restart this
+      # one service. Firefox is untouched, so the browser session survives.
+      - ../:/app:rw
+    working_dir: /app
+    environment:
+      NODE_ENV: production
+      MCP_HTTP: "true"
+      MCP_HTTP_PORT: "8931"
+      MCP_HTTP_HOST: "0.0.0.0"
+      MCP_HTTP_TOKEN: ${MCP_HTTP_TOKEN:-firefox-dev}
+    command:
+      - node
+      - /app/dist/index.js
+      - --http
+      - --connect-existing
+      - --marionette-port=2828
+      - --enable-script
+      - --enable-privileged-context
+      # P2P host-network bridge. This is the fallback route for reaching other
+      # networks when the container has no tailnet of its own, so it must keep
+      # working in the containerised layout. Requires --enable-privileged-context.
+      - --enable-bridge
+    restart: unless-stopped
+
+volumes:
+  firefox-dev-config:

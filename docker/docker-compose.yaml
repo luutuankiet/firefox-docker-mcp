@@ -14,6 +14,35 @@ services:
     volumes:
       - firefox-config:/config:rw
     shm_size: "2g"
+    # this quad100 dns allow containers to use host's magicdns 
+    # i.e. our *.lan server and *.ts.net fqn and magicdns
+    # the latter cloudflaredns is for fallback for queries outside tailnet. 
+    # else google.com would fail
+    dns: 
+      - 100.100.100.100
+      - 1.1.1.1
+    # this makes it so tailnet hosts gets suffixed with magicdns search. 
+    # default is 0 which http://tailnethost is treated literally as fqn and thus fail magicdns
+    dns_opt:
+      - ndots:1
+    
+
+  # ts:
+  #   image: tailscale/tailscale:latest
+  #   hostname: ff-ts
+  #   container_name: ff-ts
+  #   environment:
+  #     - TS_AUTHKEY=${TS_AUTHKEY}
+  #     - TS_STATE_DIR=/var/lib/tailscale
+  #     - TS_USERSPACE=false
+  #     - TS_ACCEPT_DNS=true
+  #   volumes:
+  #     - ./tailscale-conf:/var/lib/tailscale
+  #   devices:
+  #     - /dev/net/tun
+  #   cap_add: [NET_ADMIN, NET_RAW]
+  #   restart: unless-stopped
+
 
 volumes:
   firefox-config:

@@ -28,6 +28,7 @@ git push && git push --tags
 ## Index
 | Version | Date | Theme |
 |---|---|---|
+| [v0.7.0](./v0.7.0.md) | 2026-08-06 | One browser, many agents: tab tenancy, background tab operations, bulk context in every reply |
 | [v0.6.1](./v0.6.1.md) | 2026-07-30 | A "Leave page?" prompt can no longer wedge the server: pref suppression + navigation watchdog |
 | [v0.6.0](./v0.6.0.md) | 2026-07-18 | Native JSON: structuredContent across every data tool, escape noise gone |
 | [v0.5.0](./v0.5.0.md) | 2026-07-18 | Readiness-gated screenshots, app-shell scrolling, compact responses, page_info |

@@ -193,7 +193,7 @@ export async function handleGetFirefoxInfo(_input: unknown) {
 export const restartFirefoxTool = {
   name: 'restart_firefox',
   description:
-    'Restart Firefox with different configuration. Allows changing binary path, environment variables, and other options. All current tabs will be closed.',
+    'DESTRUCTIVE, REQUIRES CONFIRMATION. Restart Firefox with different configuration (binary path, environment variables, profile, startup prefs). Closes every tab and drops the browser session, which in a shared browser also destroys work belonging to a human operator or another agent. Only needed to change launch-time configuration. To recover a broken or cluttered page, close and reopen tabs instead (close_page / new_page / navigate_page); to change a preference on a running browser use set_firefox_prefs. Pass confirm=true to proceed.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -230,20 +230,65 @@ export const restartFirefoxTool = {
           oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }],
         },
       },
+      confirm: {
+        type: 'boolean',
+        description:
+          'Must be true to actually restart. Without it the call is refused and reports what would have been lost. This browser is shared with a human operator and possibly other agents, so a restart is never a safe default recovery step.',
+      },
     },
   },
 };
 
 export async function handleRestartFirefox(input: unknown) {
   try {
-    const { firefoxPath, profilePath, env, headless, startUrl, prefs } = input as {
+    const { firefoxPath, profilePath, env, headless, startUrl, prefs, confirm } = input as {
       firefoxPath?: string;
       profilePath?: string;
       env?: string[];
       headless?: boolean;
       startUrl?: string;
       prefs?: Record<string, string | number | boolean>;
+      confirm?: boolean;
     };
+
+    // Guard the shared browser. Agents reach for a restart as a generic "get
+    // unstuck" move, but this browser also carries a human operator's signed-in
+    // session and any other agent's open work, none of which survives.
+    if (confirm !== true) {
+      let openTabs = 'unknown';
+      try {
+        const running = getFirefoxIfRunning();
+        if (running && (await running.isConnected())) {
+          openTabs = String((await running.getDriver().getAllWindowHandles()).length);
+        }
+      } catch {
+        // Best-effort context only; never let the guard itself fail.
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              `Refused: restart_firefox would close all ${openTabs} open tab(s) and end the ` +
+              `browser session.\n\n` +
+              `This browser is shared. A human operator works in it over VNC and other agents ` +
+              `may hold tabs in it, so a restart destroys their signed-in state and open work ` +
+              `as well as yours.\n\n` +
+              `Try these first:\n` +
+              `  - Page broken or cluttered? close_page then new_page / navigate_page. ` +
+              `Reopening tabs achieves the same reset without touching the browser.\n` +
+              `  - Need a different preference? set_firefox_prefs changes prefs on the running ` +
+              `browser, no restart required.\n` +
+              `  - Lost track of state? list_pages, then select_page.\n\n` +
+              `A restart is only genuinely required to change launch-time configuration: ` +
+              `binary path, profile path, environment variables, or headless mode.\n` +
+              `If you are certain, call restart_firefox again with confirm=true.`,
+          },
+        ],
+        isError: true,
+      };
+    }
 
     // This tool is designed to be robust and never get stuck:
     // - Handles disconnected Firefox gracefully (resets stale reference)

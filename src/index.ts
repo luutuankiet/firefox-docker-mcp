@@ -22,8 +22,15 @@ import { version } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
+import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  StreamableHTTPServerTransport,
+  type StreamableHTTPServerTransportOptions,
+} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -38,9 +45,19 @@ import { parseArguments, parsePrefs } from './cli.js';
 import { FirefoxDevTools } from './firefox/index.js';
 import type { FirefoxLaunchOptions } from './firefox/types.js';
 import * as tools from './tools/index.js';
-import { waitForVisualReady } from './utils/visual-ready.js';
+
 import { setNavTimeoutMs, DEFAULT_NAV_TIMEOUT_MS } from './utils/nav-watchdog.js';
 import type { McpToolResponse } from './types/common.js';
+import { startAssetJanitor } from './utils/asset-janitor.js';
+import { tenancy, formatEnvelope, type TabView } from './tenancy.js';
+import {
+  CONTEXT_SCHEMA_PROPERTIES,
+  CONTEXT_ARG_KEYS,
+  isContextCapable,
+  resolveContextOptions,
+  openContextWindow,
+  collectContext,
+} from './context-bundle.js';
 
 // Export for direct usage in scripts
 export { FirefoxDevTools } from './firefox/index.js';
@@ -176,6 +193,11 @@ const toolHandlers = new Map<string, (input: unknown) => Promise<McpToolResponse
   ['select_page', tools.handleSelectPage],
   ['close_page', tools.handleClosePage],
 
+  // Tab ownership
+  ['claim_tab', tools.handleClaimTab],
+  ['release_tab', tools.handleReleaseTab],
+  ['list_agents', tools.handleListAgents],
+
   // Console
   ['list_console_messages', tools.handleListConsoleMessages],
   ['clear_console_messages', tools.handleClearConsoleMessages],
@@ -247,14 +269,61 @@ const toolHandlers = new Map<string, (input: unknown) => Promise<McpToolResponse
     : []),
 ]);
 
+/**
+ * Arguments every tool accepts, injected once here rather than repeated across
+ * each definition, so a newly registered tool is multi-agent aware by default.
+ */
+const TENANCY_SCHEMA_PROPERTIES = {
+  agent: {
+    type: 'string',
+    description:
+      'Your agent id, as returned in the envelope of any earlier response. Omit on your first call and one will be issued to you.',
+  },
+  agentLabel: {
+    type: 'string',
+    description:
+      'Optional readable name shown next to your id, e.g. what you are working on. Helps a person reading the browser tell agents apart.',
+  },
+  tab: {
+    type: 'string',
+    description:
+      'Tab id to act on, taken from an envelope or from list_pages. Defaults to your own most recent tab. Tabs owned by others are reachable but warn.',
+  },
+};
+
+function withTenancySchema<T extends { name: string; inputSchema: Record<string, any> }>(
+  tool: T
+): T {
+  const schema = tool.inputSchema ?? { type: 'object', properties: {} };
+  return {
+    ...tool,
+    inputSchema: {
+      ...schema,
+      properties: {
+        ...((schema.properties as Record<string, unknown>) ?? {}),
+        ...TENANCY_SCHEMA_PROPERTIES,
+        // Only tools whose answer is about a page can bundle one. Offering the
+        // knobs everywhere would invite an agent to ask for a screenshot from a
+        // call that has no page to photograph.
+        ...(isContextCapable(tool.name) ? CONTEXT_SCHEMA_PROPERTIES : {}),
+      },
+    },
+  };
+}
+
 // All tool definitions
-const allTools = [
+const baseTools = [
   // Pages
   tools.listPagesTool,
   tools.newPageTool,
   tools.navigatePageTool,
   tools.selectPageTool,
   tools.closePageTool,
+
+  // Tab ownership
+  tools.claimTabTool,
+  tools.releaseTabTool,
+  tools.listAgentsTool,
 
   // Console
   tools.listConsoleMessagesTool,
@@ -324,6 +393,8 @@ const allTools = [
     : []),
 ];
 
+const allTools = baseTools.map((tool) => withTenancySchema(tool as any));
+
 async function main() {
   log(`Starting ${SERVER_NAME} v${SERVER_VERSION}`);
   log(`Node.js ${version}`);
@@ -338,6 +409,18 @@ async function main() {
     logDebug(`  Viewport: ${args.viewport.width}x${args.viewport.height}`);
   }
 
+  await startTransports();
+}
+
+/**
+ * Builds a fully wired MCP server instance.
+ *
+ * Split out of main() because HTTP mode needs one Server per client session:
+ * an SDK Server owns exactly one transport, and a transport owns exactly one
+ * session. The Firefox connection stays module-global on purpose, so every
+ * session drives the same browser.
+ */
+function createMcpServer(): Server {
   const server = new Server(
     {
       name: SERVER_NAME,
@@ -384,6 +467,45 @@ async function main() {
   // fails fast with a diagnostic instead of hanging every tool in the process.
   setNavTimeoutMs(Number(args.navTimeoutMs ?? DEFAULT_NAV_TIMEOUT_MS));
 
+  // Tools that can change which tabs exist, beyond the mutation set above.
+  const TAB_CHANGING_TOOLS = new Set(['close_page', 'select_page', 'list_pages']);
+
+  // Tools that name the tab they act on in the request itself. Raising that tab
+  // first would undo the whole point, so these leave the foreground alone and a
+  // person keeps whatever they were looking at. Every one of them falls back to
+  // the classic path on its own terms, and that fallback raises the tab itself.
+  const BACKGROUND_CAPABLE_TOOLS = new Set([
+    'new_page',
+    'close_page',
+    'navigate_page',
+    'evaluate_script',
+    'screenshot_page',
+    'click_by_uid',
+    'hover_by_uid',
+    'fill_by_uid',
+    'drag_by_uid_to_uid',
+    'fill_form_by_uid',
+    'upload_file_by_uid',
+    'screenshot_by_uid',
+    'take_snapshot',
+    'list_pages',
+    'list_agents',
+    'claim_tab',
+    'release_tab',
+  ]);
+
+  // Tools that bring their own tab into being, or report on the browser as a
+  // whole. Warning them about which tab they defaulted to is noise: they were
+  // never going to act on it.
+  const TAB_AGNOSTIC_TOOLS = new Set([
+    'new_page',
+    'list_pages',
+    'list_agents',
+    'get_firefox_info',
+    'get_firefox_logs',
+    'restart_firefox',
+  ]);
+
   // Handle tool execution
   server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
     const { name, arguments: args } = request.params;
@@ -394,39 +516,226 @@ async function main() {
       throw new Error(`Unknown tool: ${name}`);
     }
 
-    try {
-      const result = await handler(args);
+    // Identity and tab targeting resolve before the tool runs; the tenancy
+    // arguments are then stripped so each handler keeps its original shape.
+    const rawArgs = (args ?? {}) as Record<string, unknown>;
+    const { agent: agentArg, agentLabel, tab: tabArg, ...rest } = rawArgs;
 
-      // Auto-append screenshot after successful mutation tools
-      if (MUTATION_TOOLS.has(name) && !result.isError && !tools.isRecording()) {
+    // The context knobs are answered here, not by the handlers, so every tool
+    // keeps the argument shape it was written with.
+    const toolArgs: Record<string, unknown> = { ...rest };
+    for (const key of CONTEXT_ARG_KEYS) {
+      delete toolArgs[key];
+    }
+    const contextOptions = resolveContextOptions(name, rawArgs, {
+      isMutation: MUTATION_TOOLS.has(name),
+    });
+    const { agent, minted, warning: agentWarning } = tenancy.resolveAgent(agentArg, agentLabel);
+    const warnings: string[] = [];
+    if (agentWarning) {
+      warnings.push(agentWarning);
+    }
+
+    let tabs: TabView[] = [];
+    let targetTab: TabView | null = null;
+    let tabWasNamed = false;
+    // Whether the tab list was observed before the tool ran. Without that
+    // baseline there is no way to tell a tab this call opened from one that was
+    // already there, and guessing would hand a person's tabs to an agent.
+    let baselineKnown = false;
+
+    // Tab work only happens once a browser exists. Resolving it unconditionally
+    // would launch Firefox for tools that never needed it.
+    let running = getFirefoxIfRunning();
+
+    // A caller that named a tab plainly needs the browser. Skipping resolution
+    // here - which is what happens on the first call after a restart - would
+    // drop the name silently and send the call to whatever tab is in front.
+    if (!running && typeof tabArg === 'string' && tabArg.trim()) {
+      try {
+        running = await getFirefox();
+      } catch (launchError) {
+        log(`Could not reach the browser to resolve tab "${tabArg}": ${launchError}`);
+      }
+    }
+
+    if (running) {
+      try {
+        await running.refreshTabs();
+        tabs = tenancy.decorateTabs(running.getTabs());
+        baselineKnown = true;
+        tenancy.pruneClosedTabs(tabs.map((tab) => tab.tabId));
+
+        const resolved = tenancy.resolveTab(agent.id, tabArg, tabs, running.getSelectedTabIdx());
+
+        // Acting on some other tab is worse than refusing: the caller would be
+        // told the work succeeded while it happened somewhere they never named.
+        if (tabArg && !resolved.tabId) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text' as const,
+                text: `❌ ${resolved.warning ?? `tab "${String(tabArg)}" not found`}`,
+              },
+              {
+                type: 'text' as const,
+                text: formatEnvelope({ agent, minted, tab: null, tabs, warnings }),
+              },
+            ],
+          };
+        }
+
+        if (resolved.warning && !(resolved.implicit && TAB_AGNOSTIC_TOOLS.has(name))) {
+          warnings.push(resolved.warning);
+        }
+        targetTab = resolved.view;
+        tabWasNamed = !resolved.implicit;
+
+        // Point the browser at the caller's own tab so concurrent agents stop
+        // racing over whichever tab happens to be focused. Nothing moves when
+        // the fallback picked a tab for them - that path only warns, which
+        // keeps a person's VNC tab out of reach of an agent that never asked
+        // for it.
+        const ownsTarget = resolved.tabId ? tenancy.ownerOf(resolved.tabId) === agent.id : false;
+        if (resolved.tabId && (!resolved.implicit || ownsTarget)) {
+          if (!BACKGROUND_CAPABLE_TOOLS.has(name)) {
+            await running.selectTabById(resolved.tabId);
+          }
+          // The cursor moves either way, so the caller's next call lands on the
+          // same tab whether or not the browser ever showed it.
+          tenancy.setCursor(agent.id, resolved.tabId);
+        }
+      } catch (tenancyError) {
+        log(`Tab resolution skipped for ${name}: ${tenancyError}`);
+      }
+    }
+
+    const finalize = async (result: McpToolResponse): Promise<McpToolResponse> => {
+      const active = getFirefoxIfRunning();
+      if (active && (MUTATION_TOOLS.has(name) || TAB_CHANGING_TOOLS.has(name))) {
         try {
-          const ff = await getFirefox();
-          let waitNote: string | null = null;
-          try {
-            waitNote = await waitForVisualReady(ff.getDriver(), screenshotWaitMs);
-          } catch {
-            // Never block the screenshot on the readiness probe
-          }
-          const base64Png = await ff.takeScreenshotPage();
-          if (base64Png && typeof base64Png === 'string') {
-            const content = Array.isArray(result.content) ? result.content : [];
-            if (waitNote) {
-              content.push({ type: 'text' as const, text: waitNote });
+          await active.refreshTabs();
+          const after = tenancy.decorateTabs(active.getTabs());
+
+          // A tab that appeared while this call was running was opened by it, so
+          // it belongs to the caller. Tabs a person opens at the VNC session
+          // appear between calls and therefore stay unowned - which is also why
+          // this only runs when the list was seen beforehand. On the very first
+          // call the browser may already be full of someone else's tabs.
+          if (baselineKnown) {
+            const before = new Set(tabs.map((tab) => tab.tabId));
+            const opened = after.filter((tab) => !before.has(tab.tabId));
+            for (const tab of opened) {
+              tenancy.claimTab(tab.tabId, agent.id);
             }
-            content.push({
-              type: 'image' as const,
-              data: base64Png,
-              mimeType: 'image/png' as const,
-            });
-            return { ...result, content };
+            if (opened.length > 0) {
+              tenancy.setCursor(agent.id, opened[opened.length - 1]!.tabId);
+            }
           }
-        } catch (screenshotError) {
-          log(`Auto-screenshot failed for ${name}: ${screenshotError}`);
-          // Return original result even if screenshot fails
+
+          tenancy.pruneClosedTabs(after.map((tab) => tab.tabId));
+          tabs = tenancy.decorateTabs(active.getTabs());
+          // A tab that no longer exists cannot be reported as where the caller
+          // is - closing one has to leave the envelope saying "no tab" rather
+          // than naming the tab that was just destroyed.
+          const cursor = tenancy.getAgent(agent.id)?.cursorTabId ?? null;
+          targetTab =
+            tabs.find((tab) => tab.tabId === cursor) ??
+            tabs.find((tab) => tab.tabId === targetTab?.tabId) ??
+            null;
+        } catch (refreshError) {
+          log(`Post-call tab refresh failed for ${name}: ${refreshError}`);
         }
       }
 
-      return result;
+      const envelope = formatEnvelope({ agent, minted, tab: targetTab, tabs, warnings });
+      const content = Array.isArray(result.content) ? [...result.content] : [];
+      content.push({ type: 'text' as const, text: envelope });
+
+      // Clients that understand structured output render it instead of the text
+      // blocks, so a tool returning one would drop the envelope entirely - and
+      // an agent that never sees its own id cannot pass it back.
+      if (result.structuredContent && typeof result.structuredContent === 'object') {
+        return {
+          ...result,
+          content,
+          structuredContent: {
+            ...(result.structuredContent as Record<string, unknown>),
+            agent: agent.id,
+            envelope,
+          },
+        };
+      }
+
+      return { ...result, content };
+    };
+
+    // Handlers see the resolved identity and the full tab id rather than the
+    // raw arguments, so a caller that passed a short id or an index still ends
+    // up acting on the same tab the envelope reports.
+    const handlerArgs: Record<string, unknown> = {
+      ...toolArgs,
+      agent: agent.id,
+      tabWasNamed,
+    };
+    if (targetTab) {
+      handlerArgs.tab = targetTab.tabId;
+    }
+
+    // Marks where this call's own console output and network traffic begin.
+    // The buffers behind them are session-wide and minutes deep, so without the
+    // mark a reply would carry everything the browser had ever done.
+    const contextWindow = openContextWindow();
+
+    try {
+      const result = await handler(handlerArgs);
+
+      // Context is gathered after the tool ran, against the tab the caller
+      // ended up on. A failed call is left alone: what it needs to explain
+      // itself is the error, not a picture of a page that never changed.
+      if (isContextCapable(name) && contextOptions.level !== 'off' && !result.isError) {
+        try {
+          const ff = await getFirefox();
+          const bundleTab = tenancy.getAgent(agent.id)?.cursorTabId ?? targetTab?.tabId ?? null;
+
+          // A recording already owns the screen; capturing frames underneath it
+          // corrupts what it is recording.
+          const options = tools.isRecording()
+            ? { ...contextOptions, screenshot: false }
+            : contextOptions;
+
+          const { blocks, structured } = await collectContext(ff, {
+            toolName: name,
+            tabId: bundleTab,
+            options,
+            window: contextWindow,
+            screenshotWaitMs,
+            log,
+          });
+
+          if (blocks.length > 0) {
+            const content = Array.isArray(result.content) ? [...result.content] : [];
+            content.push(...blocks);
+            const merged: McpToolResponse = { ...result, content };
+            // Clients that understand structured output render it instead of the
+            // text blocks, so the bundle has to appear in both or half of them
+            // would see nothing.
+            if (result.structuredContent && typeof result.structuredContent === 'object') {
+              merged.structuredContent = {
+                ...(result.structuredContent as Record<string, unknown>),
+                context: structured,
+              };
+            }
+            return await finalize(merged);
+          }
+        } catch (contextError) {
+          log(`Context bundle failed for ${name}: ${contextError}`);
+          // A missing bundle is never a reason to fail the call it accompanied.
+        }
+      }
+
+      return await finalize(result);
     } catch (error) {
       logError(`Error executing tool ${name}`, error);
       throw error;
@@ -443,15 +752,155 @@ async function main() {
     throw new Error('Resource reading not implemented');
   });
 
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  return server;
+}
 
-  log('Firefox DevTools MCP server running on stdio');
+async function startTransports() {
+  // Recording frames and browser logs pile up for the life of the container,
+  // long after the call that produced them was answered.
+  startAssetJanitor(undefined, log);
+
+  const useHttp = Boolean(args.http);
+  let httpServer: http.Server | null = null;
+  let stdioServer: Server | null = null;
+
+  // One transport -- and one Server -- per client session. A single shared
+  // transport is not viable: a transport owns exactly one session, so a second
+  // client, or the same client after a reconnect, has its initialize rejected
+  // and the endpoint stays dead until the process restarts. Every session
+  // drives the same module-global Firefox connection.
+  const sessions = new Map<string, StreamableHTTPServerTransport>();
+
+  if (useHttp) {
+    const bearer = String(args.token ?? '');
+    const port = Number(args.port ?? 8931);
+    const bindHost = String(args.host ?? '0.0.0.0');
+
+    const openSession = async (): Promise<StreamableHTTPServerTransport> => {
+      const httpOptions: StreamableHTTPServerTransportOptions = {
+        sessionIdGenerator: () => randomUUID(),
+      };
+      const transport = new StreamableHTTPServerTransport(httpOptions);
+      transport.onclose = () => {
+        const closedId = transport.sessionId;
+        if (closedId && sessions.delete(closedId)) {
+          log(`MCP session closed: ${closedId} (${sessions.size} active)`);
+        }
+      };
+      // The SDK types onclose/onerror/onmessage as accessors returning
+      // `| undefined`, which does not structurally satisfy Transport's optional
+      // members under exactOptionalPropertyTypes. Runtime shape is correct.
+      await createMcpServer().connect(transport as unknown as Transport);
+      return transport;
+    };
+
+    const handleMcpRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+      const rawId = req.headers['mcp-session-id'];
+      const sessionId = Array.isArray(rawId) ? rawId[0] : rawId;
+
+      if (sessionId) {
+        const existing = sessions.get(sessionId);
+        if (!existing) {
+          // Correct answer for a session this process no longer holds, e.g. a
+          // long-lived client that outlived a server restart. Clients treat 404
+          // as "re-initialize", which is exactly the recovery wanted here.
+          res.writeHead(404, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32001, message: 'Session not found' },
+              id: null,
+            })
+          );
+          return;
+        }
+        await existing.handleRequest(req, res);
+        return;
+      }
+
+      // No session header, so this should be an initialize. Hand it a fresh
+      // transport, then record whatever session id the SDK assigned while
+      // handling it. handleRequest branches on GET/POST/DELETE internally, so
+      // one call covers the whole streamable-http surface.
+      const transport = await openSession();
+      await transport.handleRequest(req, res);
+      const openedId = transport.sessionId;
+      if (openedId) {
+        sessions.set(openedId, transport);
+        log(`MCP session opened: ${openedId} (${sessions.size} active)`);
+      }
+    };
+
+    httpServer = http.createServer((req, res) => {
+      const url = req.url ?? '/';
+
+      // Unauthenticated so container healthchecks do not need the token.
+      if (url === '/health' || url === '/healthz') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            server: SERVER_NAME,
+            version: SERVER_VERSION,
+            sessions: sessions.size,
+          })
+        );
+        return;
+      }
+
+      if (!url.startsWith('/mcp')) {
+        res.writeHead(404).end();
+        return;
+      }
+
+      if (bearer && req.headers.authorization !== `Bearer ${bearer}`) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'unauthorized' }));
+        return;
+      }
+
+      void handleMcpRequest(req, res).catch((error: unknown) => {
+        logError('HTTP transport request failed', error);
+        if (!res.headersSent) {
+          res.writeHead(500).end();
+        }
+      });
+    });
+
+    const listener = httpServer;
+    await new Promise<void>((resolveListen, rejectListen) => {
+      listener.once('error', rejectListen);
+      listener.listen(port, bindHost, () => {
+        listener.off('error', rejectListen);
+        resolveListen();
+      });
+    });
+
+    log(`Firefox DevTools MCP server running on http://${bindHost}:${port}/mcp`);
+    log(bearer ? 'Bearer auth enabled' : 'Bearer auth DISABLED (no --token supplied)');
+  } else {
+    stdioServer = createMcpServer();
+    await stdioServer.connect(new StdioServerTransport());
+    log('Firefox DevTools MCP server running on stdio');
+  }
+
   log('Ready to accept tool requests');
 
   // Clean up the Marionette session so Firefox accepts new connections.
   // Without this, the session stays locked after the MCP client disconnects.
   const cleanup = async () => {
+    if (httpServer) {
+      const listener = httpServer;
+      await new Promise<void>((done) => listener.close(() => done()));
+    }
+    for (const transport of sessions.values()) {
+      try {
+        await transport.close();
+      } catch {
+        // ignore
+      }
+    }
+    sessions.clear();
     if (firefox) {
       try {
         await firefox.close();
@@ -459,15 +908,21 @@ async function main() {
         // ignore
       }
     }
-    await server.close();
+    if (stdioServer) {
+      await stdioServer.close();
+    }
     process.exit(0);
   };
   const onSignal = () => void cleanup();
   process.on('SIGTERM', onSignal);
   process.on('SIGINT', onSignal);
-  // StdioServerTransport does not fire onclose on stdin EOF.
-  process.stdin.on('end', onSignal);
-  process.stdin.on('close', onSignal);
+  if (!useHttp) {
+    // StdioServerTransport does not fire onclose on stdin EOF.
+    // Under HTTP these would fire immediately in a container (no stdin is
+    // attached) and shut the server down before it served a single request.
+    process.stdin.on('end', onSignal);
+    process.stdin.on('close', onSignal);
+  }
 }
 
 // Only run main() if this file is executed directly (not imported)

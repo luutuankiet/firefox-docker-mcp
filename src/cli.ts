@@ -157,6 +157,29 @@ export const cliOptions = {
       'Max milliseconds a document-unloading command (navigate_page, new_page, close_page, navigate_history) may run before failing with a diagnostic. Guards against a modal the driver cannot reach hanging the whole server. 0 disables the watchdog.',
     default: Number(process.env.FIREFOX_NAV_TIMEOUT_MS ?? '20000'),
   },
+  http: {
+    type: 'boolean',
+    description:
+      'Serve MCP over streamable HTTP instead of stdio. Intended for containerised deployments where the server is co-located with Firefox and clients connect over the network.',
+    default: (process.env.MCP_HTTP ?? 'false') === 'true',
+  },
+  port: {
+    type: 'number',
+    description: 'TCP port for the HTTP transport (default: 8931). Ignored unless --http.',
+    default: Number(process.env.MCP_HTTP_PORT ?? '8931'),
+  },
+  host: {
+    type: 'string',
+    description:
+      'Bind address for the HTTP transport (default: 0.0.0.0 so the port can be published out of a container). Ignored unless --http.',
+    default: process.env.MCP_HTTP_HOST ?? '0.0.0.0',
+  },
+  token: {
+    type: 'string',
+    description:
+      'Shared bearer token required in the Authorization header of every HTTP request. Empty string disables the check. Ignored unless --http.',
+    default: process.env.MCP_HTTP_TOKEN ?? '',
+  },
 } satisfies Record<string, YargsOptions>;
 
 export function parseArguments(version: string, argv = process.argv) {

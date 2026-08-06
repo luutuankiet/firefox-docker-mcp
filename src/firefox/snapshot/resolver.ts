@@ -95,6 +95,24 @@ export class UidResolver {
   }
 
   /**
+   * Resolve UID to the selectors that find it, without touching the browser.
+   *
+   * Both are returned because the caller may be looking the element up in a tab
+   * the driver is not focused on, where the XPath fallback has to be applied on
+   * the far side rather than here.
+   */
+  resolveUidToLocators(uid: string): { css: string; xpath?: string } {
+    this.validateUid(uid);
+
+    const entry = this.uidToEntry.get(uid);
+    if (!entry) {
+      throw new Error(`UID not found: ${uid}. Take a fresh snapshot first.`);
+    }
+
+    return { css: entry.css, ...(entry.xpath && { xpath: entry.xpath }) };
+  }
+
+  /**
    * Resolve UID to element (with staleness check and caching)
    * Tries CSS first, falls back to XPath
    */

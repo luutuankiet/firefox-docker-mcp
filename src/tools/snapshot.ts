@@ -78,6 +78,7 @@ export async function handleTakeSnapshot(args: unknown): Promise<McpToolResponse
       maxDepth,
       includeAll = false,
       selector,
+      tab,
     } = (args as {
       maxLines?: number;
       includeAttributes?: boolean;
@@ -85,6 +86,7 @@ export async function handleTakeSnapshot(args: unknown): Promise<McpToolResponse
       maxDepth?: number;
       includeAll?: boolean;
       selector?: string;
+      tab?: string;
     }) || {};
 
     // Apply hard cap on maxLines to prevent token overflow
@@ -102,8 +104,17 @@ export async function handleTakeSnapshot(args: unknown): Promise<McpToolResponse
     if (selector) {
       snapshotOptions.selector = selector;
     }
-    const snapshot = await firefox.takeSnapshot(
-      Object.keys(snapshotOptions).length > 0 ? snapshotOptions : undefined
+    // Snapshotting a named tab leaves the foreground alone, which matters more
+    // here than anywhere else: taking a snapshot is the first step of every uid
+    // workflow, so a focused-only path would move the view before any agent had
+    // done a thing.
+    const { onTabOrFocused } = await import('../utils/tab-routing.js');
+    const snapshotArgs = Object.keys(snapshotOptions).length > 0 ? snapshotOptions : undefined;
+    const snapshot = await onTabOrFocused(
+      firefox,
+      tab,
+      (tabId) => firefox.takeSnapshotInTab(tabId, snapshotArgs),
+      () => firefox.takeSnapshot(snapshotArgs)
     );
 
     // Import formatter to apply custom options
@@ -179,14 +190,19 @@ export async function handleResolveUidToSelector(args: unknown): Promise<McpTool
   }
 }
 
-export async function handleClearSnapshot(_args: unknown): Promise<McpToolResponse> {
+export async function handleClearSnapshot(args: unknown): Promise<McpToolResponse> {
   try {
+    const { tab } = (args as { tab?: string }) || {};
+
     const { getFirefox } = await import('../index.js');
     const firefox = await getFirefox();
 
-    firefox.clearSnapshot();
+    // Uids belong to the tab they were taken in, so clearing is scoped to one
+    // tab. Without a tab there is nothing to scope to and every tab is cleared,
+    // which is the older, blunter behaviour.
+    firefox.clearSnapshot(tab);
 
-    return successResponse('🧹 Snapshot cleared');
+    return successResponse(tab ? `🧹 Snapshot cleared for tab ${tab}` : '🧹 Snapshots cleared');
   } catch (error) {
     return errorResponse(error as Error);
   }

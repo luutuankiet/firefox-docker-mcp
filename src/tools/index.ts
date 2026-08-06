@@ -16,6 +16,16 @@ export {
   handleClosePage,
 } from './pages.js';
 
+// Tab ownership tools
+export {
+  claimTabTool,
+  releaseTabTool,
+  listAgentsTool,
+  handleClaimTab,
+  handleReleaseTab,
+  handleListAgents,
+} from './tenancy-tools.js';
+
 // Script evaluation tools
 export { evaluateScriptTool, handleEvaluateScript } from './script.js';
 

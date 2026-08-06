@@ -6,6 +6,7 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { successResponse, errorResponse } from '../utils/response-helpers.js';
 import { handleUidError } from '../utils/uid-helpers.js';
+import { isBiDiUnavailable } from '../firefox/bidi-ops.js';
 import type { McpToolResponse } from '../types/common.js';
 
 const SAVE_TO_SCHEMA = {
@@ -74,12 +75,34 @@ function imageResponse(base64Png: string): McpToolResponse {
 // Handlers
 export async function handleScreenshotPage(args: unknown): Promise<McpToolResponse> {
   try {
-    const { saveTo } = (args ?? {}) as { saveTo?: string };
+    const { saveTo, tab } = (args ?? {}) as { saveTo?: string; tab?: string };
 
     const { getFirefox } = await import('../index.js');
     const firefox = await getFirefox();
 
-    const base64Png = await firefox.takeScreenshotPage();
+    // Capturing the tab by name avoids raising it. Firefox throttles rendering
+    // off-screen, so a background tab can come back blank - the focused capture
+    // below is the honest answer when that happens.
+    let base64Png: string | null = null;
+    if (tab) {
+      try {
+        base64Png = await firefox.screenshotTab(tab);
+      } catch {
+        base64Png = null;
+      }
+    }
+    if (!base64Png) {
+      // The classic capture photographs whatever is on screen, so the intended
+      // tab has to be raised first or the caller gets someone else's page.
+      if (tab) {
+        try {
+          await firefox.selectTabById(tab);
+        } catch {
+          // A tab that vanished mid-call: capture whatever is there instead.
+        }
+      }
+      base64Png = await firefox.takeScreenshotPage();
+    }
 
     if (!base64Png || typeof base64Png !== 'string') {
       throw new Error('Invalid screenshot data');
@@ -97,7 +120,7 @@ export async function handleScreenshotPage(args: unknown): Promise<McpToolRespon
 
 export async function handleScreenshotByUid(args: unknown): Promise<McpToolResponse> {
   try {
-    const { uid, saveTo } = args as { uid: string; saveTo?: string };
+    const { uid, saveTo, tab } = args as { uid: string; saveTo?: string; tab?: string };
 
     if (!uid || typeof uid !== 'string') {
       throw new Error('uid required');
@@ -107,7 +130,23 @@ export async function handleScreenshotByUid(args: unknown): Promise<McpToolRespo
     const firefox = await getFirefox();
 
     try {
-      const base64Png = await firefox.takeScreenshotByUid(uid);
+      // Capturing the element in a named tab leaves the foreground alone. The
+      // classic capture below photographs whatever is on screen, so the tab has
+      // to be raised first or the picture is of someone else's page.
+      let base64Png: string | null = null;
+      if (tab) {
+        try {
+          base64Png = await firefox.screenshotUidInTab(tab, uid);
+        } catch (error) {
+          if (!isBiDiUnavailable(error)) {
+            throw error;
+          }
+          await firefox.selectTabById(tab);
+        }
+      }
+      if (!base64Png) {
+        base64Png = await firefox.takeScreenshotByUid(uid);
+      }
 
       if (!base64Png || typeof base64Png !== 'string') {
         throw new Error('Invalid screenshot data');

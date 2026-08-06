@@ -11,7 +11,7 @@ const NETWORK_TTL_MS = 5 * 60 * 1000; // 5 minutes TTL for old requests
 
 export interface NetworkEventsOptions {
   /** Callback triggered on navigation events (for auto-clear) */
-  onNavigate?: () => void;
+  onNavigate?: (contextId?: string) => void;
   /** Auto-clear network requests on navigation (default: true when monitoring is enabled) */
   autoClearOnNavigate?: boolean;
 }
@@ -74,7 +74,9 @@ export class NetworkEvents {
             this.clearRequests();
           }
           if (this.options.onNavigate) {
-            this.options.onNavigate();
+            // Which page navigated decides whose page state is now wrong; without
+            // it every tab has to be treated as having navigated.
+            this.options.onNavigate(payload.params?.context);
           }
           return;
         }
@@ -97,6 +99,9 @@ export class NetworkEvents {
 
           const record = {
             id: requestId,
+            // The tab that made the request, so a reply can report the calls its
+            // own page made instead of the whole browser's traffic.
+            context: req.context,
             url: req.request?.url || '',
             method: req.request?.method || 'GET',
             timestamp: Date.now(),

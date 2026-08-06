@@ -3,6 +3,7 @@
  */
 
 import { successResponse, errorResponse } from '../utils/response-helpers.js';
+import { isBiDiUnavailable } from '../firefox/bidi-ops.js';
 import type { McpToolResponse } from '../types/common.js';
 
 export const evaluateScriptTool = {
@@ -83,10 +84,12 @@ export async function handleEvaluateScript(args: unknown): Promise<McpToolRespon
       function: fnString,
       args: fnArgs,
       timeout,
+      tab,
     } = args as {
       function: string;
       args?: Array<{ uid: string }>;
       timeout?: number;
+      tab?: string;
     };
 
     // Validate function
@@ -101,6 +104,29 @@ export async function handleEvaluateScript(args: unknown): Promise<McpToolRespon
     }
 
     const scriptTimeout = timeout ?? DEFAULT_TIMEOUT;
+
+    // A function with no element arguments can run in the tab by name, which
+    // leaves the browser's focus untouched. Element arguments are handles the
+    // classic driver owns, so those still take the path below.
+    if (tab && (!fnArgs || fnArgs.length === 0)) {
+      try {
+        const value = await firefox.evaluateInTab(tab, fnString);
+        const response = successResponse(
+          'Script ran on page and returned: ' + JSON.stringify(value ?? null)
+        );
+        response.structuredContent = { result: value === undefined ? null : value };
+        return response;
+      } catch (error) {
+        // A script that threw in the page threw for real; only an unusable
+        // channel is worth retrying the slower way.
+        if (!isBiDiUnavailable(error)) {
+          throw error;
+        }
+        // The classic path runs wherever the browser is looking, so the tab has
+        // to be raised for the script to reach the page the caller meant.
+        await firefox.selectTabById(tab);
+      }
+    }
 
     // Prepare arguments: resolve UIDs to WebElements if provided
     const resolvedArgs: unknown[] = [];

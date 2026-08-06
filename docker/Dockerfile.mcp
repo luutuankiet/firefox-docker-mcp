@@ -1,0 +1,33 @@
+# MCP server image for the dev stack.
+#
+# Deliberately NOT built on top of jlesage/firefox. That image is Alpine/musl,
+# and geckodriver ships only glibc builds -- Mozilla publishes no musl target.
+# Running the MCP server in its own glibc container that *joins* Firefox's
+# network namespace sidesteps that entirely, and keeps the browser alive across
+# server restarts.
+FROM node:22-bookworm-slim
+
+# The geckodriver npm package downloads its binary at first use into
+# os.tmpdir() unless GECKODRIVER_CACHE_DIR is set. Baking it in means the first
+# tool call does not block on a GitHub fetch, and the container works offline.
+ARG GECKODRIVER_VERSION=0.37.1
+ENV GECKODRIVER_CACHE_DIR=/opt/geckodriver \
+    GECKODRIVER_VERSION=${GECKODRIVER_VERSION}
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p "${GECKODRIVER_CACHE_DIR}" \
+ && curl -fsSL "https://github.com/mozilla/geckodriver/releases/download/v${GECKODRIVER_VERSION}/geckodriver-v${GECKODRIVER_VERSION}-linux64.tar.gz" \
+    | tar -xz -C "${GECKODRIVER_CACHE_DIR}" \
+ && chmod 755 "${GECKODRIVER_CACHE_DIR}/geckodriver" \
+ && "${GECKODRIVER_CACHE_DIR}/geckodriver" --version
+
+# Source is bind-mounted at run time, not copied, so a host rebuild is picked up
+# by restarting this one service.
+WORKDIR /app
+
+# Also suppresses the optional dotenv import in src/index.ts.
+ENV NODE_ENV=production
+
+CMD ["node", "/app/dist/index.js"]
