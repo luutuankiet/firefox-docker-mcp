@@ -1,0 +1,40 @@
+# Production MCP server image: the published npm release, pinned by version.
+#
+# Deliberately NOT built on top of jlesage/firefox. That image is Alpine/musl
+# and geckodriver ships glibc-only builds, so the server runs in its own glibc
+# container that JOINS Firefox's network namespace. That is also what keeps the
+# browser alive across server restarts.
+#
+# One difference from Dockerfile.mcp (dev) matters: the server is baked in at a
+# fixed version rather than bind-mounted from the working tree, so a running
+# production stack never changes because someone rebuilt source on the host.
+FROM node:22-bookworm-slim
+
+# The geckodriver npm package downloads its binary at first use into
+# os.tmpdir() unless GECKODRIVER_CACHE_DIR is set. Baking it in means the first
+# tool call does not block on a GitHub fetch, and the container works offline.
+ARG GECKODRIVER_VERSION=0.37.1
+ENV GECKODRIVER_CACHE_DIR=/opt/geckodriver \
+    GECKODRIVER_VERSION=${GECKODRIVER_VERSION}
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p "${GECKODRIVER_CACHE_DIR}" \
+ && curl -fsSL "https://github.com/mozilla/geckodriver/releases/download/v${GECKODRIVER_VERSION}/geckodriver-v${GECKODRIVER_VERSION}-linux64.tar.gz" \
+    | tar -xz -C "${GECKODRIVER_CACHE_DIR}" \
+ && chmod 755 "${GECKODRIVER_CACHE_DIR}/geckodriver" \
+ && "${GECKODRIVER_CACHE_DIR}/geckodriver" --version
+
+# Pinned by the compose file. No default: an unpinned production image is how
+# you end up unable to say what is running.
+ARG MCP_VERSION
+RUN test -n "${MCP_VERSION}" \
+ && npm install -g "@luutuankiet/firefox-docker-mcp@${MCP_VERSION}" \
+ && npm cache clean --force \
+ && command -v firefox-docker-mcp
+
+# Also suppresses the optional dotenv import in the server entrypoint.
+ENV NODE_ENV=production
+
+CMD ["firefox-docker-mcp"]

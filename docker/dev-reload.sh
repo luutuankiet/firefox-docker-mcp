@@ -14,8 +14,8 @@ docker compose -f docker/docker-compose.dev.yaml restart mcp
 
 # Give the server a moment to bind before reporting health.
 for _ in $(seq 1 20); do
-  if curl -fsS --max-time 2 http://127.0.0.1:8931/health >/dev/null 2>&1; then
-    curl -fsS http://127.0.0.1:8931/health
+  if curl -fsS --max-time 2 http://127.0.0.1:8941/health >/dev/null 2>&1; then
+    curl -fsS http://127.0.0.1:8941/health
     echo
     exit 0
   fi

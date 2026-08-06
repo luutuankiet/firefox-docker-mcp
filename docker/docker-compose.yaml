@@ -1,48 +1,107 @@
+# Production stack: browser and MCP server, one `docker compose up -d`.
+#
+# Replaces the host-networked, stdio-launched topology archived at
+# docker/archive/docker-compose.host-stdio.yaml. The MCP server no longer runs
+# on the host under npx@latest; it is a pinned image that joins Firefox's
+# network namespace and serves streamable HTTP on 8931.
+#
+# Shape: Firefox owns the network namespace and the MCP server joins it.
+# Marionette only ever binds 127.0.0.1 and offers no rebind knob, so sharing a
+# namespace is what makes an HTTP-fronted MCP server possible at all.
+#
+# Consequence of that shape: only the namespace *owner* may declare `dns:` and
+# `ports:`. Docker hard-errors ("conflicting options: dns and the network
+# mode") if a joining container sets DNS, and published ports belong to the
+# owner. So both live on the firefox service even though 8931 is bound by the
+# mcp service.
+
+# Explicit project name. Without it Compose derives one from this file's
+# directory (`docker`), which is also what the retired stack used -- and its
+# old profile volume `docker_firefox-config` is still on disk. The explicit
+# name keeps this stack's volume separate from it.
+name: firefox
+
 services:
   firefox:
     image: jlesage/firefox
-    container_name: firefox-mcp
-    network_mode: host
+    container_name: firefox
     environment:
       DISPLAY_WIDTH: "1920"
       DISPLAY_HEIGHT: "1080"
-      FF_CUSTOM_ARGS: "--marionette --remote-debugging-port 9222"
+      # Automation flags are parameterised so the container can be recreated
+      # without them -- Google and other identity providers refuse sign-in on a
+      # browser running under Marionette/remote-debugging. See ff-takeover.sh.
+      #
+      # Note the SINGLE dash in ${VAR-default}: it falls back to the default
+      # only when VAR is entirely unset. With `:-` an explicitly empty value
+      # would be replaced by the default, which is exactly what takeover mode
+      # needs to set.
+      FF_CUSTOM_ARGS: "${FF_PROD_CUSTOM_ARGS---marionette --remote-debugging-port 9222}"
       MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: "1"
       FF_PREF_MARIONETTE_PORT: "marionette.port=2828"
-      FF_PREF_MARIONETTE_ENABLED: "marionette.enabled=true"
+      FF_PREF_MARIONETTE_ENABLED: "marionette.enabled=${FF_PROD_MARIONETTE:-true}"
       KEEP_APP_RUNNING: "1"
     volumes:
       - firefox-config:/config:rw
     shm_size: "2g"
-    # this quad100 dns allow containers to use host's magicdns 
-    # i.e. our *.lan server and *.ts.net fqn and magicdns
-    # the latter cloudflaredns is for fallback for queries outside tailnet. 
-    # else google.com would fail
-    dns: 
+    ports:
+      # MCP streamable-HTTP endpoint. Bound by the mcp service; published here
+      # because this service owns the namespace.
+      - "8931:8931"
+      # noVNC and raw VNC, on the same host ports the retired host-networked
+      # container used, so existing bookmarks keep working.
+      - "5800:5800"
+      - "5900:5900"
+    # MagicDNS MUST come first. Docker's embedded resolver only advances to the
+    # next server on SERVFAIL, and 1.1.1.1 answers *.ts.net with an
+    # authoritative NXDOMAIN -- reverse these and every tailnet name silently
+    # stops resolving. 1.1.1.1 is required because MagicDNS SERVFAILs public
+    # names on this tailnet.
+    dns:
       - 100.100.100.100
       - 1.1.1.1
-    # this makes it so tailnet hosts gets suffixed with magicdns search. 
-    # default is 0 which http://tailnethost is treated literally as fqn and thus fail magicdns
+    # Docker defaults to ndots:0, which treats bare names as fully qualified and
+    # never appends the MagicDNS search domain, breaking http://thinkpad.lan.
     dns_opt:
       - ndots:1
-    
+    restart: unless-stopped
 
-  # ts:
-  #   image: tailscale/tailscale:latest
-  #   hostname: ff-ts
-  #   container_name: ff-ts
-  #   environment:
-  #     - TS_AUTHKEY=${TS_AUTHKEY}
-  #     - TS_STATE_DIR=/var/lib/tailscale
-  #     - TS_USERSPACE=false
-  #     - TS_ACCEPT_DNS=true
-  #   volumes:
-  #     - ./tailscale-conf:/var/lib/tailscale
-  #   devices:
-  #     - /dev/net/tun
-  #   cap_add: [NET_ADMIN, NET_RAW]
-  #   restart: unless-stopped
-
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      args:
+        MCP_VERSION: ${MCP_VERSION:-0.7.0}
+    image: firefox-docker-mcp:${MCP_VERSION:-0.7.0}
+    container_name: firefox-mcp
+    depends_on:
+      - firefox
+    # Joins Firefox's namespace to reach Marionette on 127.0.0.1:2828.
+    # Because of this: no `dns:`, no `ports:` on this service.
+    network_mode: "service:firefox"
+    environment:
+      NODE_ENV: production
+      MCP_HTTP: "true"
+      MCP_HTTP_PORT: "8931"
+      MCP_HTTP_HOST: "0.0.0.0"
+      # Required. The endpoint is reachable from the whole tailnet, so refusing
+      # to start without a token is the intended behaviour.
+      MCP_HTTP_TOKEN: ${MCP_PROD_HTTP_TOKEN:?set MCP_PROD_HTTP_TOKEN in docker/.env}
+      # Screenshots, recordings and network payloads are only useful for the
+      # duration of the tool call that produced them; sweep hourly.
+      MCP_ASSET_TTL_MIN: "60"
+    command:
+      - firefox-docker-mcp
+      - --http
+      - --connect-existing
+      - --marionette-port=2828
+      - --enable-script
+      - --enable-privileged-context
+      # P2P host-network bridge. The fallback route for reaching other networks
+      # when the container has no tailnet of its own. Requires
+      # --enable-privileged-context.
+      - --enable-bridge
+    restart: unless-stopped
 
 volumes:
   firefox-config:

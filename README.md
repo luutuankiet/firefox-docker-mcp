@@ -14,36 +14,54 @@ Built for agents that need to close their own verification loop: check a fronten
  Human (browser)              AI Agent (MCP client)
       │                              │
       ▼                              ▼
- VNC web UI (:5800)          MCP server (stdio)
+ VNC web UI (:5800)          MCP over HTTP (:8931)
       │                              │
+      │                    ┌─────────▼─────────┐
+      │                    │  MCP server       │
+      │                    │  (own container,  │
+      │                    │   joins the net-  │
+      │                    │   work namespace) │
+      │                    └─────────┬─────────┘
       └──────────┐    ┌──────────────┘
                  ▼    ▼
            Firefox (Docker)
-           Marionette :2828
+           Marionette :2828 (loopback only)
 ```
 
-Firefox runs in Docker. The human connects via noVNC at `localhost:5800`. The agent connects via MCP tools through Marionette. Same tabs, same cookies, same page state. Marionette is single-session, so access is turn-based — not concurrent.
+Firefox runs in Docker. The human connects via noVNC at `localhost:5800`. The agent connects over streamable HTTP on `:8931`. Same tabs, same cookies, same page state.
+
+Marionette binds loopback and cannot be told otherwise, which is why the server runs in its own container that *joins* Firefox's network namespace rather than talking to it over the network. Multiple agents share the browser through per-tab ownership (see `claim_tab` / `list_pages`), so concurrent agents stay out of each other's tabs.
 
 ## Quick Start
 
-### 1. Run Firefox in Docker
+### 1. Start the stack
 
 ```bash
-cd docker/
-docker compose up -d
+cp docker/.env.example docker/.env   # then set MCP_PROD_HTTP_TOKEN to a random string
+docker compose -f docker/docker-compose.yaml up -d
 ```
 
-Open `http://localhost:5800` in your browser — you should see Firefox.
+That brings up Firefox and the MCP server together. Open `http://localhost:5800` for the browser; `http://localhost:8931/health` should answer `{"ok":true,...}`.
 
-### 2. Run the MCP server
+The server image is pinned to a published release. To move it, set `MCP_VERSION` in `docker/.env` and rebuild.
 
-```bash
-npx @luutuankiet/firefox-docker-mcp --connect-existing --marionette-port 2828
+### 2. Configure your MCP client
+
+```json
+{
+  "mcpServers": {
+    "firefox": {
+      "type": "http",
+      "url": "http://localhost:8931/mcp",
+      "headers": { "Authorization": "Bearer <MCP_PROD_HTTP_TOKEN>" }
+    }
+  }
+}
 ```
 
-### 3. Configure your MCP client
+### Alternative: server on the host, over stdio
 
-Add to your MCP client config (e.g. Claude Code `settings.json`):
+If you would rather run the browser alone and start the server per client, run any Firefox container that exposes Marionette on the host and point the published package at it:
 
 ```json
 {
@@ -51,14 +69,23 @@ Add to your MCP client config (e.g. Claude Code `settings.json`):
     "firefox": {
       "command": "npx",
       "args": [
-        "firefox-docker-mcp",
+        "@luutuankiet/firefox-docker-mcp",
         "--connect-existing",
         "--marionette-port", "2828",
-        "--enable-priviledged-context"
+        "--enable-privileged-context"
       ]
     }
   }
 }
+```
+
+### Signing in to sites that reject automation
+
+Google and several other identity providers refuse sign-in on a browser advertising Marionette. Drop the automation flags, sign in by hand through noVNC, then switch back — the profile is a named volume, so the session survives:
+
+```bash
+./docker/ff-takeover.sh takeover   # flags off, sign in at :5800
+./docker/ff-takeover.sh automate   # flags back on, server reattached
 ```
 
 ## What Makes This Different
@@ -141,6 +168,16 @@ npm install
 npm run build
 npm run dev          # watch mode with tsx
 node test-e2e.mjs   # end-to-end test
+```
+
+A second, isolated stack runs the server from the working tree instead of a
+published release, on its own ports (`8941`, VNC `5810`) and its own profile
+volume, so it never disturbs a running production stack:
+
+```bash
+docker compose -f docker/docker-compose.dev.yaml up -d
+./docker/dev-reload.sh                 # rebuild + swap the server, browser keeps running
+STACK=dev ./docker/ff-takeover.sh status
 ```
 
 ## License

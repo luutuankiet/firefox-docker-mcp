@@ -1,0 +1,75 @@
+# RETIRED 2026-08-06 -- kept for reference only. Do not `docker compose up` this file.
+#
+# This was the production topology before the stack was containerised:
+#
+#   * one container, jlesage/firefox, on the HOST network namespace, so
+#     Marionette listened on the host's 127.0.0.1:2828 and noVNC on host
+#     5800/5900;
+#   * the MCP server did NOT run in a container at all. The proxy on thinkpad
+#     started it over stdio, per tool call session, with:
+#
+#       command: /home/ken/.nvm/versions/node/v22.20.0/bin/npx
+#       args:    -y @luutuankiet/firefox-docker-mcp@latest
+#                --connect-existing --marionette-port 2828
+#                --enable-script --enable-privileged-context --enable-bridge
+#
+#     (registered as `firefox-mcp` in ~/.mcpproxy/mcp_config.json on thinkpad,
+#     reached from the hetzner proxy through the nested path thinkpad/firefox-mcp)
+#
+# Why it was replaced: the server floated at @latest with no pinned version,
+# every client got its own stdio process against one shared browser, and the
+# host had to carry a working Node toolchain. The current stack ships the
+# browser and a pinned MCP release together and speaks streamable HTTP on 8931.
+#
+# The old profile volume `docker_firefox-config` was deliberately NOT deleted
+# at cutover; it still holds the pre-cutover browser profile if anything needs
+# recovering from it.
+
+services:
+  firefox:
+    image: jlesage/firefox
+    container_name: firefox-mcp
+    network_mode: host
+    environment:
+      DISPLAY_WIDTH: "1920"
+      DISPLAY_HEIGHT: "1080"
+      FF_CUSTOM_ARGS: "--marionette --remote-debugging-port 9222"
+      MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: "1"
+      FF_PREF_MARIONETTE_PORT: "marionette.port=2828"
+      FF_PREF_MARIONETTE_ENABLED: "marionette.enabled=true"
+      KEEP_APP_RUNNING: "1"
+    volumes:
+      - firefox-config:/config:rw
+    shm_size: "2g"
+    # this quad100 dns allow containers to use host's magicdns 
+    # i.e. our *.lan server and *.ts.net fqn and magicdns
+    # the latter cloudflaredns is for fallback for queries outside tailnet. 
+    # else google.com would fail
+    dns: 
+      - 100.100.100.100
+      - 1.1.1.1
+    # this makes it so tailnet hosts gets suffixed with magicdns search. 
+    # default is 0 which http://tailnethost is treated literally as fqn and thus fail magicdns
+    dns_opt:
+      - ndots:1
+    
+
+  # ts:
+  #   image: tailscale/tailscale:latest
+  #   hostname: ff-ts
+  #   container_name: ff-ts
+  #   environment:
+  #     - TS_AUTHKEY=${TS_AUTHKEY}
+  #     - TS_STATE_DIR=/var/lib/tailscale
+  #     - TS_USERSPACE=false
+  #     - TS_ACCEPT_DNS=true
+  #   volumes:
+  #     - ./tailscale-conf:/var/lib/tailscale
+  #   devices:
+  #     - /dev/net/tun
+  #   cap_add: [NET_ADMIN, NET_RAW]
+  #   restart: unless-stopped
+
+
+volumes:
+  firefox-config:

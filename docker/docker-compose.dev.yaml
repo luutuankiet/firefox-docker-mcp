@@ -1,6 +1,7 @@
-# Dev stack -- entirely separate from docker-compose.yaml (prod), which is
-# host-networked and speaks MCP over stdio from the host. Distinct container
-# names, distinct volume, distinct published ports. Nothing here touches prod.
+# Dev stack -- entirely separate from docker-compose.yaml (prod). Same shape as
+# prod since the cutover, but with distinct container names, a distinct volume,
+# distinct published ports, and source bind-mounted from the working tree
+# instead of a pinned npm release. Nothing here touches prod.
 #
 # Shape: Firefox owns the network namespace and the MCP server joins it.
 # Marionette only ever binds 127.0.0.1 and offers no rebind knob, so sharing a
@@ -44,11 +45,12 @@ services:
       - firefox-dev-config:/config:rw
     shm_size: "2g"
     ports:
-      # MCP streamable-HTTP endpoint. Bound by the mcp service; published here
-      # because this service owns the namespace.
-      - "8931:8931"
+      # MCP streamable-HTTP endpoint, offset on the host because prod owns 8931.
+      # Bound by the mcp service; published here because this service owns the
+      # namespace.
+      - "8941:8931"
       # noVNC and raw VNC, offset from 5800/5900 so they cannot collide with
-      # the host-networked prod container.
+      # the prod container.
       - "5810:5800"
       - "5910:5900"
     # MagicDNS MUST come first. Docker's embedded resolver only advances to the
