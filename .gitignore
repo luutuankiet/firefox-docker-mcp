@@ -3,3 +3,7 @@ dist/
 gsd-lite/
 .claude/
 .env
+
+# Tailscale node state for the optional sidecar. Holds the node's private key
+# and its auth material, and is written as root, so it must never be staged.
+docker/tailscale-conf/
