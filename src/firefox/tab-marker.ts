@@ -17,7 +17,7 @@
  * missing decoration is never worth failing the call it rode along with.
  */
 
-import { agentColor, HUMAN_OWNER, shortTabId, UNOWNED_COLOR } from '../tenancy.js';
+import { agentColor, HUMAN_OWNER, tabName, UNOWNED_COLOR } from '../tenancy.js';
 
 /**
  * Element id of the injected badge. The DOM walkers skip it by name: an agent
@@ -56,7 +56,7 @@ export async function applyTabMarker(
 ): Promise<void> {
   const unowned = !owner || owner === HUMAN_OWNER;
   const color = unowned ? UNOWNED_COLOR : agentColor(owner);
-  const label = unowned ? `unclaimed · ${shortTabId(tabId)}` : `${owner} · ${shortTabId(tabId)}`;
+  const label = unowned ? `unclaimed · ${tabName(tabId)}` : `${owner} · ${tabName(tabId)}`;
 
   const payload = JSON.stringify({
     badgeId: TAB_BADGE_ID,

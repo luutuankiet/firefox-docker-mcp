@@ -22,12 +22,21 @@ runs before npm commits or tags, so a failure leaves nothing to clean up.
 ```
 # write releases/vX.Y.Z.md + add the index row FIRST, then:
 npm version patch
-git push && git push --tags
+git push origin main
+git push origin vX.Y.Z   # never --tags: this clone carries upstream-fork tags
 ```
+
+**Never `git push --tags` from this repo.** The clone still holds the tag history of the
+project this was forked from, including versions numbered above our own release line.
+Pushing them all sends tags that `publish.yml` would try to publish as this package.
+GitHub refuses to create workflow runs for a push of more than three tags, which is the
+only reason that has never actually happened — and that same rule silently suppresses the
+real release's workflow too. Push one tag, by name.
 
 ## Index
 | Version | Date | Theme |
 |---|---|---|
+| [v0.9.0](./v0.9.0.md) | 2026-08-08 | Tabs you can say out loud, sized the way you asked: word names as selectors, per-tab viewports with presets |
 | [v0.8.0](./v0.8.0.md) | 2026-08-08 | Screenshots at the size an agent actually reads: measured legibility floor, ~4x fewer image tokens |
 | [v0.7.1](./v0.7.1.md) | 2026-08-08 | A borrowed tab is now a refusal, not a warning: fallback writes blocked, ownership visible in VNC |
 | [v0.7.0](./v0.7.0.md) | 2026-08-06 | One browser, many agents: tab tenancy, background tab operations, bulk context in every reply |

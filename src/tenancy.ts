@@ -22,10 +22,19 @@ export const HUMAN_OWNER = 'human';
 
 export interface TabView {
   tabId: string;
+  /** Word this tab answers to, e.g. `maple`. Stable while the tab lives. */
+  name: string;
   index: number;
   title: string;
   url: string;
   owner: string;
+}
+
+/** A viewport an agent asked for, held so later callers can see it. */
+export interface TabViewport {
+  width: number;
+  height: number;
+  devicePixelRatio?: number;
 }
 
 export interface AgentRecord {
@@ -118,17 +127,74 @@ function mintAgentId(): string {
 }
 
 /**
- * Window handles are opaque and long. Envelopes show a prefix so a person can
- * match a response to a tab at a glance; the full id stays the wire value.
+ * Words handed out as tab names. Chosen to be pronounceable, concrete and
+ * unlike each other when skimmed - a person glancing at a VNC session should
+ * be able to hold "maple" in their head where "a5126214" slid straight out of
+ * it. Kept clear of anything that reads as a status word, so a name is never
+ * mistaken for a message.
  */
-export function shortTabId(tabId: string): string {
+const TAB_WORDS = [
+  'amber', 'anchor', 'apple', 'arbor', 'arrow', 'aspen', 'atlas', 'autumn',
+  'bacon', 'badge', 'bagel', 'balloon', 'bamboo', 'banjo', 'barley', 'basil',
+  'beacon', 'beetle', 'birch', 'bishop', 'bison', 'blossom', 'bonsai', 'boulder',
+  'bramble', 'bronze', 'bubble', 'bucket', 'buffalo', 'bugle', 'bunker', 'butter',
+  'cabin', 'cactus', 'camel', 'candle', 'canyon', 'carbon', 'cargo', 'carrot',
+  'cedar', 'cello', 'chalk', 'cherry', 'chimney', 'cinder', 'citrus', 'clover',
+  'cobalt', 'cocoa', 'comet', 'copper', 'coral', 'cotton', 'cougar', 'crater',
+  'crimson', 'crystal', 'cypress', 'dahlia', 'daisy', 'dapple', 'delta', 'denim',
+  'diamond', 'dingo', 'domino', 'donkey', 'dragon', 'dune', 'dusk', 'eagle',
+  'ember', 'emerald', 'falcon', 'fennel', 'fern', 'fiddle', 'flint', 'forest',
+  'fossil', 'fountain', 'foxglove', 'frost', 'galaxy', 'garnet', 'gecko', 'ginger',
+  'glacier', 'granite', 'gravel', 'grotto', 'guava', 'gully', 'gypsum', 'hammock',
+  'harbor', 'harvest', 'hazel', 'heather', 'hickory', 'hollow', 'honey', 'hornet',
+  'ivory', 'jasmine', 'jetty', 'jigsaw', 'juniper', 'kayak', 'kelp', 'kettle',
+  'koala', 'lagoon', 'lantern', 'lark', 'lattice', 'lavender', 'ledger', 'lemon',
+  'lichen', 'lilac', 'linen', 'lobster', 'locket', 'lotus', 'lumber', 'magnet',
+  'mango', 'maple', 'marble', 'marlin', 'meadow', 'mesa', 'meteor', 'mint',
+  'mirror', 'mitten', 'monsoon', 'moss', 'mulberry', 'nectar', 'nickel', 'nutmeg',
+  'oasis', 'obsidian', 'olive', 'onyx', 'opal', 'orbit', 'orchid', 'osprey',
+  'otter', 'oxide', 'paddle', 'pagoda', 'pantry', 'papaya', 'parsley', 'pebble',
+  'pelican', 'pepper', 'petal', 'pewter', 'pigeon', 'pine', 'plum', 'pollen',
+  'pumice', 'quartz', 'quiver', 'radish', 'rattan', 'raven', 'ribbon', 'rosemary',
+  'saffron', 'sage', 'sandal', 'sapphire', 'satin', 'scarlet', 'sequoia', 'shale',
+  'sienna', 'silver', 'sorrel', 'spruce', 'sugar', 'sumac', 'tamarind', 'teak',
+  'thistle', 'thyme', 'timber', 'topaz', 'truffle', 'tulip', 'tundra', 'turmeric',
+  'umber', 'velvet', 'verbena', 'vessel', 'violet', 'walnut', 'willow', 'zephyr',
+];
+
+/**
+ * The first eight characters of a window handle. No longer shown anywhere, but
+ * still accepted as a selector so ids copied out of an older transcript keep
+ * working.
+ */
+export function tabIdPrefix(tabId: string): string {
   const compact = tabId.replace(/[^a-zA-Z0-9]/g, '');
   return compact.length > 8 ? compact.slice(0, 8) : compact;
+}
+
+/**
+ * The name a tab answers to. Window handles are opaque hex that a person
+ * cannot hold in their head or say out loud, which matters because the same
+ * tab has to be recognised in a tool response, in a VNC window and in a
+ * sentence typed to another agent. One word does all three.
+ */
+export function tabName(tabId: string): string {
+  return tenancy.nameFor(tabId);
 }
 
 class TenancyRegistry {
   private agents = new Map<string, AgentRecord>();
   private claims = new Map<string, { owner: string; claimedAt: number }>();
+  /** tabId -> word. Minted on first sight, kept until the tab closes. */
+  private names = new Map<string, string>();
+  /** Words currently spoken for, so two live tabs never share one. */
+  private takenNames = new Set<string>();
+  /**
+   * Viewport overrides, tracked because a tab silently rendering at phone
+   * width is the kind of thing the next caller needs told rather than left to
+   * deduce from a screenshot that looks wrong.
+   */
+  private viewports = new Map<string, TabViewport>();
   /**
    * Last write per tab, tracked separately from claims because an unowned tab
    * still gets navigated - and the caller who finds it changed deserves to
@@ -206,6 +272,69 @@ class TenancyRegistry {
     return this.claims.get(tabId)?.owner ?? HUMAN_OWNER;
   }
 
+  /**
+   * The word this tab answers to, minting one the first time it is asked for.
+   *
+   * The starting point is derived from the handle, so a tab tends to keep its
+   * name across a server restart; the walk forward from there is what
+   * guarantees no two live tabs collide, which matters because the name is a
+   * selector and not just a label.
+   */
+  nameFor(tabId: string): string {
+    if (!tabId) {
+      return '';
+    }
+    const existing = this.names.get(tabId);
+    if (existing) {
+      return existing;
+    }
+    let hash = 0;
+    for (let i = 0; i < tabId.length; i += 1) {
+      hash = (hash * 31 + tabId.charCodeAt(i)) >>> 0;
+    }
+    const start = hash % TAB_WORDS.length;
+    let name = '';
+    for (let i = 0; i < TAB_WORDS.length; i += 1) {
+      const candidate = TAB_WORDS[(start + i) % TAB_WORDS.length]!;
+      if (!this.takenNames.has(candidate)) {
+        name = candidate;
+        break;
+      }
+    }
+    // More live tabs than words is not a case worth designing for, but it is a
+    // case worth surviving.
+    if (!name) {
+      name = `${TAB_WORDS[start]}-${this.names.size + 1}`;
+    }
+    this.names.set(tabId, name);
+    this.takenNames.add(name);
+    return name;
+  }
+
+  /** Look a tab up by the word it answers to. Case does not matter. */
+  tabIdForName(name: string): string | null {
+    const wanted = name.trim().toLowerCase();
+    for (const [tabId, word] of this.names) {
+      if (word === wanted) {
+        return tabId;
+      }
+    }
+    return null;
+  }
+
+  /** Record a viewport override so it can be reported, or clear it with null. */
+  setViewport(tabId: string, viewport: TabViewport | null): void {
+    if (viewport) {
+      this.viewports.set(tabId, viewport);
+    } else {
+      this.viewports.delete(tabId);
+    }
+  }
+
+  viewportOf(tabId: string | null | undefined): TabViewport | null {
+    return tabId ? (this.viewports.get(tabId) ?? null) : null;
+  }
+
   tabsOwnedBy(agentId: string): string[] {
     const owned: string[] = [];
     for (const [tabId, claim] of this.claims) {
@@ -248,6 +377,19 @@ class TenancyRegistry {
         this.actions.delete(tabId);
       }
     }
+    for (const tabId of [...this.viewports.keys()]) {
+      if (!live.has(tabId)) {
+        this.viewports.delete(tabId);
+      }
+    }
+    // A closed tab's word goes back in the pool, so a long-lived server does
+    // not slowly run out of names it is no longer using.
+    for (const [tabId, word] of [...this.names]) {
+      if (!live.has(tabId)) {
+        this.names.delete(tabId);
+        this.takenNames.delete(word);
+      }
+    }
     for (const agent of this.agents.values()) {
       if (agent.cursorTabId && !live.has(agent.cursorTabId)) {
         agent.cursorTabId = null;
@@ -259,6 +401,7 @@ class TenancyRegistry {
   decorateTabs(tabs: Array<{ actor: string; title: string; url: string }>): TabView[] {
     return tabs.map((tab, index) => ({
       tabId: tab.actor,
+      name: this.nameFor(tab.actor),
       index,
       title: tab.title || 'Untitled',
       url: tab.url || 'about:blank',
@@ -292,12 +435,25 @@ class TenancyRegistry {
           source: 'explicit',
         };
       }
-      const byShortId = tabs.find((t) => shortTabId(t.tabId) === requested);
-      if (byShortId) {
+      const lowered = requested.toLowerCase();
+      const byName = tabs.find((t) => t.name === lowered);
+      if (byName) {
         return {
-          tabId: byShortId.tabId,
-          view: byShortId,
-          warning: this.crossOwnerWarning(agentId, byShortId),
+          tabId: byName.tabId,
+          view: byName,
+          warning: this.crossOwnerWarning(agentId, byName),
+          implicit: false,
+          source: 'explicit',
+        };
+      }
+      // Hex prefixes are no longer printed anywhere, but a caller replaying an
+      // older transcript should not be told its tab vanished.
+      const byPrefix = tabs.find((t) => tabIdPrefix(t.tabId) === requested);
+      if (byPrefix) {
+        return {
+          tabId: byPrefix.tabId,
+          view: byPrefix,
+          warning: this.crossOwnerWarning(agentId, byPrefix),
           implicit: false,
           source: 'explicit',
         };
@@ -309,7 +465,7 @@ class TenancyRegistry {
           tabId: view.tabId,
           view,
           warning: [
-            `tab "${requested}" read as index ${asIndex}; indices shift when any agent opens or closes a tab, so prefer tabId ${shortTabId(view.tabId)}`,
+            `tab "${requested}" read as index ${asIndex}; indices shift when any agent opens or closes a tab, so prefer tabId ${tabName(view.tabId)}`,
             this.crossOwnerWarning(agentId, view),
           ]
             .filter(Boolean)
@@ -318,7 +474,7 @@ class TenancyRegistry {
           source: 'explicit',
         };
       }
-      const known = tabs.map((t) => shortTabId(t.tabId)).join(', ');
+      const known = tabs.map((t) => tabName(t.tabId)).join(', ');
       return {
         tabId: null,
         view: null,
@@ -357,8 +513,8 @@ class TenancyRegistry {
       view: focused,
       warning:
         owned.length > 1
-          ? `no tab given and you hold ${owned.length}; reading the focused tab ${shortTabId(focused.tabId)} - pass tab explicitly, writes will not use this fallback`
-          : `no tab given and you hold none; reading the focused tab ${shortTabId(focused.tabId)}, which ${belongsTo} - call new_page to get a tab of your own`,
+          ? `no tab given and you hold ${owned.length}; reading the focused tab ${tabName(focused.tabId)} - pass tab explicitly, writes will not use this fallback`
+          : `no tab given and you hold none; reading the focused tab ${tabName(focused.tabId)}, which ${belongsTo} - call new_page to get a tab of your own`,
       implicit: true,
       source: 'fallback',
     };
@@ -369,9 +525,9 @@ class TenancyRegistry {
       return null;
     }
     if (view.owner === HUMAN_OWNER) {
-      return `tab ${shortTabId(view.tabId)} is unowned and may belong to a person at the VNC session`;
+      return `tab ${tabName(view.tabId)} is unowned and may belong to a person at the VNC session`;
     }
-    return `tab ${shortTabId(view.tabId)} belongs to ${view.owner}`;
+    return `tab ${tabName(view.tabId)} belongs to ${view.owner}`;
   }
 }
 
@@ -416,8 +572,17 @@ export function formatEnvelope(input: {
   if (others) census.push(`${others} other agents`);
   if (human) census.push(`${human} unowned`);
 
+  const viewport = tab ? tenancy.viewportOf(tab.tabId) : null;
+  const geometry = viewport
+    ? ` ${viewport.width}x${viewport.height}${
+        viewport.devicePixelRatio && viewport.devicePixelRatio !== 1
+          ? `@${viewport.devicePixelRatio}x`
+          : ''
+      }`
+    : '';
+
   const where = tab
-    ? `tab ${shortTabId(tab.tabId)} "${truncate(tab.title, 40)}"`
+    ? `tab ${tabName(tab.tabId)}${geometry} "${truncate(tab.title, 40)}"`
     : 'no tab';
 
   lines.push(

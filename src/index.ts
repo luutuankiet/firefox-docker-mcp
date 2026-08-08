@@ -58,7 +58,7 @@ import {
 import {
   tenancy,
   formatEnvelope,
-  shortTabId,
+  tabName,
   HUMAN_OWNER,
   type TabView,
 } from './tenancy.js';
@@ -691,18 +691,18 @@ function createMcpServer(): Server {
           const options = [`  new_page  - open a tab of your own (recommended)`];
           if (mine.length > 0) {
             options.push(
-              `  tab:"${shortTabId(mine[0]!.tabId)}"  - act on a tab you already hold${
+              `  tab:"${tabName(mine[0]!.tabId)}"  - act on a tab you already hold${
                 mine.length > 1
-                  ? ` (you hold ${mine.length}: ${mine.map((t) => shortTabId(t.tabId)).join(', ')})`
+                  ? ` (you hold ${mine.length}: ${mine.map((t) => tabName(t.tabId)).join(', ')})`
                   : ''
               }`
             );
           }
           options.push(
-            `  tab:"${shortTabId(victim.tabId)}"  - act on this tab anyway, having seen what it is`
+            `  tab:"${tabName(victim.tabId)}"  - act on this tab anyway, having seen what it is`
           );
           options.push(
-            `  claim_tab ${shortTabId(victim.tabId)}  - take it over for the rest of your session`
+            `  claim_tab ${tabName(victim.tabId)}  - take it over for the rest of your session`
           );
 
           const refusal: Array<
@@ -716,7 +716,7 @@ function createMcpServer(): Server {
                 }.`,
                 `Running it would have acted on a tab you did not ask for:`,
                 ``,
-                `  tab    ${shortTabId(victim.tabId)}`,
+                `  tab    ${tabName(victim.tabId)}`,
                 `  title  ${victim.title}`,
                 `  url    ${victim.url}`,
                 `  owner  ${ownerLabel}`,
@@ -747,7 +747,7 @@ function createMcpServer(): Server {
               });
             }
           } catch (shotError) {
-            log(`Refusal screenshot failed for ${shortTabId(victim.tabId)}: ${shotError}`);
+            log(`Refusal screenshot failed for ${tabName(victim.tabId)}: ${shotError}`);
           }
 
           refusal.push({

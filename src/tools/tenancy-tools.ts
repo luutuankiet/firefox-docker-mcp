@@ -7,7 +7,7 @@
  */
 
 import { successResponse, errorResponse } from '../utils/response-helpers.js';
-import { tenancy, shortTabId, HUMAN_OWNER } from '../tenancy.js';
+import { tenancy, tabName, HUMAN_OWNER } from '../tenancy.js';
 import type { McpToolResponse } from '../types/common.js';
 
 export const claimTabTool = {
@@ -62,7 +62,7 @@ export async function handleClaimTab(args: unknown): Promise<McpToolResponse> {
     // focused tab cannot take it by accident.
     if (previous === HUMAN_OWNER && !tabWasNamed) {
       throw new Error(
-        `tab ${shortTabId(tab)} is unowned and was only the focused tab, not one you named. ` +
+        `tab ${tabName(tab)} is unowned and was only the focused tab, not one you named. ` +
           'Someone may be using it. Pass its tab id explicitly to adopt it on purpose.'
       );
     }
@@ -70,7 +70,7 @@ export async function handleClaimTab(args: unknown): Promise<McpToolResponse> {
     tenancy.setCursor(agent, tab);
 
     const from = previous === HUMAN_OWNER ? 'the unowned pool' : previous;
-    return successResponse(`✅ tab ${shortTabId(tab)} claimed from ${from}`);
+    return successResponse(`✅ tab ${tabName(tab)} claimed from ${from}`);
   } catch (error) {
     return errorResponse(error as Error);
   }
@@ -86,12 +86,12 @@ export async function handleReleaseTab(args: unknown): Promise<McpToolResponse> 
 
     const owner = tenancy.ownerOf(tab);
     if (owner === HUMAN_OWNER) {
-      return successResponse(`tab ${shortTabId(tab)} was already unowned`);
+      return successResponse(`tab ${tabName(tab)} was already unowned`);
     }
 
     tenancy.releaseTab(tab);
     const note = owner === agent ? '' : ` (it belonged to ${owner})`;
-    return successResponse(`✅ tab ${shortTabId(tab)} released${note}`);
+    return successResponse(`✅ tab ${tabName(tab)} released${note}`);
   } catch (error) {
     return errorResponse(error as Error);
   }

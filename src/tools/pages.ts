@@ -6,7 +6,7 @@ import { successResponse, errorResponse } from '../utils/response-helpers.js';
 import { ensureUnloadPromptsDisabled } from '../utils/unload-guard.js';
 import { withNavigationWatchdog, getNavTimeoutMs } from '../utils/nav-watchdog.js';
 import type { McpToolResponse } from '../types/common.js';
-import { tenancy, shortTabId, HUMAN_OWNER } from '../tenancy.js';
+import { tenancy, tabName, HUMAN_OWNER } from '../tenancy.js';
 import { isBiDiUnavailable } from '../firefox/bidi-ops.js';
 
 // Tool definitions
@@ -131,7 +131,9 @@ function formatPageList(
   for (const row of visible) {
     const marker = row.index === selectedIdx ? '>' : ' ';
     const owner = row.owner === HUMAN_OWNER ? 'unowned' : row.owner;
-    lines.push(`${marker}[${row.index}] ${shortTabId(row.tabId)}  ${owner}  ${row.title}`);
+    const viewport = tenancy.viewportOf(row.tabId);
+    const geometry = viewport ? `  ${viewport.width}x${viewport.height}` : '';
+    lines.push(`${marker}[${row.index}] ${tabName(row.tabId)}${geometry}  ${owner}  ${row.title}`);
     lines.push(`      ${row.url}`);
   }
   return lines.join('\n');
@@ -202,7 +204,7 @@ export async function handleNewPage(args: unknown): Promise<McpToolResponse> {
     }
 
     return successResponse(
-      `✅ new page [${created.index}] id ${shortTabId(created.tabId)} → ${url}`
+      `✅ new page [${created.index}] id ${tabName(created.tabId)} → ${url}`
     );
   } catch (error) {
     return errorResponse(error as Error);
@@ -252,7 +254,7 @@ export async function handleNavigatePage(args: unknown): Promise<McpToolResponse
 
     const idx = firefox.indexOfTab(targetId);
     return successResponse(
-      `✅ [${idx >= 0 ? idx : selectedIdx}] ${shortTabId(targetId)} → ${url}`
+      `✅ [${idx >= 0 ? idx : selectedIdx}] ${tabName(targetId)} → ${url}`
     );
   } catch (error) {
     return errorResponse(error as Error);
@@ -285,7 +287,7 @@ export async function handleSelectPage(args: unknown): Promise<McpToolResponse> 
     if (tabWasNamed && tab) {
       const idx = firefox.indexOfTab(tab);
       if (idx < 0) {
-        throw new Error(`Tab ${shortTabId(tab)} is no longer open`);
+        throw new Error(`Tab ${tabName(tab)} is no longer open`);
       }
       selectedIdx = idx;
     }
@@ -323,7 +325,7 @@ export async function handleSelectPage(args: unknown): Promise<McpToolResponse> 
     await firefox.selectTab(selectedIdx);
 
     return successResponse(
-      `✅ selected [${selectedIdx}] ${shortTabId(tabs[selectedIdx]!.actor)} - this is now the tab on screen`
+      `✅ selected [${selectedIdx}] ${tabName(tabs[selectedIdx]!.actor)} - this is now the tab on screen`
     );
   } catch (error) {
     return errorResponse(error as Error);
@@ -350,13 +352,13 @@ export async function handleClosePage(args: unknown): Promise<McpToolResponse> {
     if (tabWasNamed && tab) {
       const idx = firefox.indexOfTab(tab);
       if (idx < 0) {
-        throw new Error(`Tab ${shortTabId(tab)} is no longer open`);
+        throw new Error(`Tab ${tabName(tab)} is no longer open`);
       }
       const owner = tenancy.ownerOf(tab);
       await ensureUnloadPromptsDisabled(firefox);
       // Closing a named tab leaves the view where it was, so an agent cleaning
       // up its own tabs no longer drags a person off the page they are reading.
-      await withNavigationWatchdog(`close_page ${shortTabId(tab)}`, getNavTimeoutMs(), async () => {
+      await withNavigationWatchdog(`close_page ${tabName(tab)}`, getNavTimeoutMs(), async () => {
         try {
           await firefox.closeTabInBackground(tab);
         } catch (error) {
@@ -368,7 +370,7 @@ export async function handleClosePage(args: unknown): Promise<McpToolResponse> {
       });
       tenancy.releaseTab(tab);
       const note = owner === HUMAN_OWNER ? ' (it was unowned)' : '';
-      return successResponse(`✅ closed [${idx}] ${shortTabId(tab)}${note}`);
+      return successResponse(`✅ closed [${idx}] ${tabName(tab)}${note}`);
     }
 
     if (typeof pageIdx !== 'number') {
@@ -387,7 +389,7 @@ export async function handleClosePage(args: unknown): Promise<McpToolResponse> {
     );
     tenancy.releaseTab(pageToClose.actor);
 
-    return successResponse(`✅ closed [${pageIdx}] ${shortTabId(pageToClose.actor)}`);
+    return successResponse(`✅ closed [${pageIdx}] ${tabName(pageToClose.actor)}`);
   } catch (error) {
     return errorResponse(error as Error);
   }

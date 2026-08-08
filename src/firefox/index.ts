@@ -14,6 +14,7 @@ import {
   navigateInContext,
   callFunctionInContext,
   screenshotContext,
+  setViewportInContext,
   waitForContextReady,
 } from './bidi-ops.js';
 import {
@@ -373,6 +374,18 @@ export class FirefoxClient {
       throw new Error('Not connected');
     }
     return await this.pages.setViewportSize(width, height);
+  }
+
+  /**
+   * Resize a single tab's content viewport. Throws when the browser has no
+   * BiDi session, which is the caller's cue to fall back to the window.
+   */
+  async setTabViewport(
+    tabId: string,
+    viewport: { width: number; height: number } | null,
+    devicePixelRatio?: number | null
+  ): Promise<void> {
+    return await setViewportInContext(this.bidi, tabId, viewport, devicePixelRatio);
   }
 
   async acceptDialog(promptText?: string): Promise<void> {

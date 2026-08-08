@@ -182,6 +182,29 @@ export async function settleCompositor(sendBiDi: SendBiDi, context: string): Pro
   }
 }
 
+/**
+ * Resize one tab's content viewport, leaving the window - and therefore every
+ * other tab, and the view of anyone watching over VNC - alone.
+ *
+ * The classic WebDriver equivalent resizes the OS window, which is a fleet-wide
+ * change dressed up as a per-call one: an agent laying out a phone screen would
+ * reshape every other agent's page at the same time. This names its tab.
+ *
+ * A null viewport hands the tab back to whatever the window says.
+ */
+export async function setViewportInContext(
+  sendBiDi: SendBiDi,
+  context: string,
+  viewport: { width: number; height: number } | null,
+  devicePixelRatio?: number | null
+): Promise<void> {
+  const params: Record<string, unknown> = { context, viewport };
+  if (devicePixelRatio !== undefined) {
+    params.devicePixelRatio = devicePixelRatio;
+  }
+  await sendBiDi('browsingContext.setViewport', params);
+}
+
 export async function screenshotContext(sendBiDi: SendBiDi, context: string): Promise<string> {
   await settleCompositor(sendBiDi, context);
   const res = await sendBiDi('browsingContext.captureScreenshot', {
