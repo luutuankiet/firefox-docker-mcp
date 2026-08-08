@@ -72,7 +72,7 @@ const selector = p.selector || null;
 const mode = p.mode || (selector ? 'text' : 'outline');
 const limit = typeof p.limit === 'number' ? p.limit : 10;
 const maxChars = typeof p.maxChars === 'number' ? p.maxChars : 4000;
-const strip = Array.isArray(p.strip) ? p.strip : ['script', 'style'];
+const strip = Array.isArray(p.strip) ? p.strip : ['script', 'style', '[data-ff-mcp]'];
 const maxDepth = typeof p.maxDepth === 'number' ? p.maxDepth : 3;
 const omit = Array.isArray(p.omitAttrs) ? p.omitAttrs : [];
 let truncated = false;
@@ -101,6 +101,10 @@ function normText(el) {
 function outline(root) {
   const out = [];
   function walk(el, depth, path) {
+    // The tab-ownership badge is drawn for the person at the VNC session, not
+    // for the page. Reporting it would describe this server's furniture as
+    // page content.
+    if (el.getAttribute && el.getAttribute('data-ff-mcp')) return;
     const cls = classesOf(el);
     out.push({
       depth: depth,

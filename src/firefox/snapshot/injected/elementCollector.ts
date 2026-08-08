@@ -104,6 +104,15 @@ export function isRelevant(el: Element): boolean {
     return false;
   }
 
+  // Furniture this server drew itself. The tab-ownership badge exists for the
+  // person watching over VNC; handing it to an agent as page content would
+  // both mislead and hand out a uid that clicks nothing. Checked before every
+  // other rule because the badge carries a role and an aria-hidden attribute,
+  // either of which would otherwise wave it straight through.
+  if (el.hasAttribute('data-ff-mcp')) {
+    return false;
+  }
+
   // Check visibility
   if (!isVisible(el)) {
     return false;

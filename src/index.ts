@@ -49,7 +49,15 @@ import * as tools from './tools/index.js';
 import { setNavTimeoutMs, DEFAULT_NAV_TIMEOUT_MS } from './utils/nav-watchdog.js';
 import type { McpToolResponse } from './types/common.js';
 import { startAssetJanitor } from './utils/asset-janitor.js';
-import { tenancy, formatEnvelope, type TabView } from './tenancy.js';
+import {
+  tenancy,
+  formatEnvelope,
+  shortTabId,
+  HUMAN_OWNER,
+  type TabView,
+} from './tenancy.js';
+import { applyTabMarkers } from './firefox/tab-marker.js';
+import { digestTab } from './firefox/tab-digest.js';
 import {
   CONTEXT_SCHEMA_PROPERTIES,
   CONTEXT_ARG_KEYS,
@@ -468,7 +476,16 @@ function createMcpServer(): Server {
   setNavTimeoutMs(Number(args.navTimeoutMs ?? DEFAULT_NAV_TIMEOUT_MS));
 
   // Tools that can change which tabs exist, beyond the mutation set above.
-  const TAB_CHANGING_TOOLS = new Set(['close_page', 'select_page', 'list_pages']);
+  // Ownership changes are in here too: they change no tabs, but they do change
+  // what colour every tab should be wearing over VNC, and list_pages doubles as
+  // the way to force a repaint by hand.
+  const TAB_CHANGING_TOOLS = new Set([
+    'close_page',
+    'select_page',
+    'list_pages',
+    'claim_tab',
+    'release_tab',
+  ]);
 
   // Tools that name the tab they act on in the request itself. Raising that tab
   // first would undo the whole point, so these leave the foreground alone and a
@@ -506,6 +523,21 @@ function createMcpServer(): Server {
     'restart_firefox',
   ]);
 
+  // Tools that change who holds a tab without touching what it displays.
+  // They mutate, so they belong in the mutation set, but a breadcrumb saying
+  // the page may have moved would be a lie: claiming a tab leaves the document
+  // exactly as it was.
+  const OWNERSHIP_TOOLS = new Set(['claim_tab', 'release_tab']);
+
+  /**
+   * Whether a call could have changed what a tab is showing - the only kind
+   * worth leaving a breadcrumb for. Excludes tools that bring their own tab
+   * (the tab resolved for them is a bystander, not a target) and tools that
+   * only move ownership around.
+   */
+  const changesPageContent = (tool: string): boolean =>
+    MUTATION_TOOLS.has(tool) && !TAB_AGNOSTIC_TOOLS.has(tool) && !OWNERSHIP_TOOLS.has(tool);
+
   // Handle tool execution
   server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
     const { name, arguments: args } = request.params;
@@ -539,6 +571,10 @@ function createMcpServer(): Server {
     let tabs: TabView[] = [];
     let targetTab: TabView | null = null;
     let tabWasNamed = false;
+    // True when the tab in hand was assumed from whatever the browser had in
+    // front rather than requested or owned. Nothing that writes is allowed to
+    // use one.
+    let targetIsFallback = false;
     // Whether the tab list was observed before the tool ran. Without that
     // baseline there is no way to tell a tab this call opened from one that was
     // already there, and guessing would hand a person's tabs to an agent.
@@ -586,7 +622,16 @@ function createMcpServer(): Server {
           };
         }
 
-        if (resolved.warning && !(resolved.implicit && TAB_AGNOSTIC_TOOLS.has(name))) {
+        // The ownership tools are about to change the answer, so reporting who
+        // holds the tab as it stands would contradict the very next line of
+        // their own output.
+        const ownershipTool = OWNERSHIP_TOOLS.has(name);
+
+        if (
+          resolved.warning &&
+          !ownershipTool &&
+          !(resolved.implicit && TAB_AGNOSTIC_TOOLS.has(name))
+        ) {
           warnings.push(resolved.warning);
         }
         targetTab = resolved.view;
@@ -597,13 +642,121 @@ function createMcpServer(): Server {
         // the fallback picked a tab for them - that path only warns, which
         // keeps a person's VNC tab out of reach of an agent that never asked
         // for it.
-        const ownsTarget = resolved.tabId ? tenancy.ownerOf(resolved.tabId) === agent.id : false;
-        if (resolved.tabId && (!resolved.implicit || ownsTarget)) {
+        // Tools that write to a page, minus the ones that bring their own tab
+        // into being or report on the browser as a whole.
+        const writesToPage = MUTATION_TOOLS.has(name) && !TAB_AGNOSTIC_TOOLS.has(name);
+
+        // The whole point of the exercise. A write that got here by falling
+        // back to the focused tab is a write with no stated target: the caller
+        // named nothing and owns nothing, so "where" was answered by whatever
+        // happened to be on screen at that instant. Warning about it was tried
+        // and did not work - an agent mid-task reads the warning, keeps its
+        // own idea of which tab it is on, and drives somebody else's page.
+        // Refusing costs the caller one extra call and costs everyone else
+        // nothing.
+        if (writesToPage && resolved.source === 'fallback' && resolved.view) {
+          const victim = resolved.view;
+          const heldByOther = victim.owner !== HUMAN_OWNER;
+          const ownerLabel = heldByOther ? victim.owner : 'nobody - a person may be using it';
+          const mine = tabs.filter((tab) => tab.owner === agent.id);
+
+          // Read the page before saying no. An agent told only "not yours"
+          // calls straight back to find out what it nearly touched, so the
+          // refusal has to arrive already answering that.
+          const digest = await digestTab(running, victim.tabId).catch(() => null);
+
+          const options = [`  new_page  - open a tab of your own (recommended)`];
+          if (mine.length > 0) {
+            options.push(
+              `  tab:"${shortTabId(mine[0]!.tabId)}"  - act on a tab you already hold${
+                mine.length > 1
+                  ? ` (you hold ${mine.length}: ${mine.map((t) => shortTabId(t.tabId)).join(', ')})`
+                  : ''
+              }`
+            );
+          }
+          options.push(
+            `  tab:"${shortTabId(victim.tabId)}"  - act on this tab anyway, having seen what it is`
+          );
+          options.push(
+            `  claim_tab ${shortTabId(victim.tabId)}  - take it over for the rest of your session`
+          );
+
+          const refusal: Array<
+            { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
+          > = [
+            {
+              type: 'text' as const,
+              text: [
+                `❌ ${name} refused: no tab given, and you hold ${
+                  mine.length === 0 ? 'none' : `${mine.length}`
+                }.`,
+                `Running it would have acted on a tab you did not ask for:`,
+                ``,
+                `  tab    ${shortTabId(victim.tabId)}`,
+                `  title  ${victim.title}`,
+                `  url    ${victim.url}`,
+                `  owner  ${ownerLabel}`,
+                ...(digest
+                  ? [
+                      `  page   ${digest.links} links, ${digest.controls} form controls`,
+                      `  text   ${digest.text || '(no visible text)'}`,
+                    ]
+                  : []),
+                ``,
+                `That is what is on the tab, plus a screenshot where your client`,
+                `shows one - deciding what to do next needs no further calls.`,
+                `Pick one:`,
+                ...options,
+              ].join('\n'),
+            },
+          ];
+
+          // Best-effort: an unreachable page is a reason to say less, never a
+          // reason to turn a refusal into a crash.
+          try {
+            const shot = await running.screenshotTab(victim.tabId);
+            if (shot) {
+              refusal.push({ type: 'image' as const, data: shot, mimeType: 'image/png' });
+            }
+          } catch (shotError) {
+            log(`Refusal screenshot failed for ${shortTabId(victim.tabId)}: ${shotError}`);
+          }
+
+          refusal.push({
+            type: 'text' as const,
+            text: formatEnvelope({
+              agent,
+              minted,
+              tab: victim,
+              tabs,
+              warnings,
+              lastWriter: tenancy.lastActionOn(victim.tabId),
+            }),
+          });
+
+          return { isError: true, content: refusal };
+        }
+
+        targetIsFallback = resolved.source === 'fallback';
+
+        // Naming an unowned tab is informed consent, so the tab becomes the
+        // caller's. Without this an agent can work a tab all session and still
+        // be counted as holding nothing, which is the state that makes the
+        // fallback reachable in the first place.
+        if (resolved.tabId && resolved.source === 'explicit' && resolved.view) {
+          if (resolved.view.owner === HUMAN_OWNER && writesToPage) {
+            tenancy.claimTab(resolved.tabId, agent.id);
+          }
+        }
+
+        if (resolved.tabId && !targetIsFallback) {
           if (!BACKGROUND_CAPABLE_TOOLS.has(name)) {
             await running.selectTabById(resolved.tabId);
           }
           // The cursor moves either way, so the caller's next call lands on the
-          // same tab whether or not the browser ever showed it.
+          // same tab whether or not the browser ever showed it. This is what
+          // stops the target being re-decided against live focus on every call.
           tenancy.setCursor(agent.id, resolved.tabId);
         }
       } catch (tenancyError) {
@@ -613,6 +766,22 @@ function createMcpServer(): Server {
 
     const finalize = async (result: McpToolResponse): Promise<McpToolResponse> => {
       const active = getFirefoxIfRunning();
+
+      // Recorded against the tab as it was before the refresh below moves the
+      // cursor around, and only when the call could actually have changed the
+      // page. This is what lets the next caller be told the tab moved under
+      // them instead of having to work it out from the content.
+      //
+      // The tool set matters more than it looks. `new_page` mutates, but the
+      // tab resolved for it is whatever happened to be in front - not the tab
+      // it goes on to create. Stamping that one leaves a breadcrumb accusing
+      // an agent of touching a page it never opened, which is worse than no
+      // breadcrumb at all: the next caller reads it and distrusts a tab that
+      // never changed.
+      if (targetTab && changesPageContent(name) && !result.isError) {
+        tenancy.recordAction(targetTab.tabId, agent.id, name);
+      }
+
       if (active && (MUTATION_TOOLS.has(name) || TAB_CHANGING_TOOLS.has(name))) {
         try {
           await active.refreshTabs();
@@ -636,6 +805,21 @@ function createMcpServer(): Server {
 
           tenancy.pruneClosedTabs(after.map((tab) => tab.tabId));
           tabs = tenancy.decorateTabs(active.getTabs());
+
+          // Repaint the ownership marks a person sees over VNC. A navigation
+          // discards the badge along with the old document, a fresh tab has
+          // never had one, and a tab that changed hands is wearing the wrong
+          // colour - so the whole list is refreshed rather than guessed at.
+          // Tabs a person opened by hand get marked here too, which is the
+          // only moment the server learns they exist.
+          try {
+            await applyTabMarkers(
+              active,
+              tabs.map((tab) => ({ tabId: tab.tabId, owner: tab.owner }))
+            );
+          } catch (markerError) {
+            log(`Tab marker repaint failed after ${name}: ${markerError}`);
+          }
           // A tab that no longer exists cannot be reported as where the caller
           // is - closing one has to leave the envelope saying "no tab" rather
           // than naming the tab that was just destroyed.
@@ -649,7 +833,14 @@ function createMcpServer(): Server {
         }
       }
 
-      const envelope = formatEnvelope({ agent, minted, tab: targetTab, tabs, warnings });
+      const envelope = formatEnvelope({
+        agent,
+        minted,
+        tab: targetTab,
+        tabs,
+        warnings,
+        lastWriter: tenancy.lastActionOn(targetTab?.tabId),
+      });
       const content = Array.isArray(result.content) ? [...result.content] : [];
       content.push({ type: 'text' as const, text: envelope });
 
@@ -679,7 +870,11 @@ function createMcpServer(): Server {
       agent: agent.id,
       tabWasNamed,
     };
-    if (targetTab) {
+    // A tab the server merely assumed is never handed to a tool that writes.
+    // The refusal above already turns that case away; this is the backstop for
+    // the tools exempt from it, and for whatever gets added to the mutation set
+    // later by someone who has not read this file.
+    if (targetTab && !(targetIsFallback && MUTATION_TOOLS.has(name))) {
       handlerArgs.tab = targetTab.tabId;
     }
 
