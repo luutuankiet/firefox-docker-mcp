@@ -16,6 +16,8 @@
  * enough to decide its next move without another call.
  */
 
+import { SCREENSHOT_DETAIL_SCHEMA } from './utils/image-scale.js';
+
 type BundleContent =
   | { type: 'text'; text: string }
   | { type: 'image'; data: string; mimeType: 'image/png' };
@@ -65,10 +67,18 @@ export const CONTEXT_SCHEMA_PROPERTIES = {
     type: 'boolean',
     description: 'Include network requests made while this tool ran. On by default.',
   },
+  detail: SCREENSHOT_DETAIL_SCHEMA,
 };
 
 /** Stripped from the arguments before the handler sees them. */
-export const CONTEXT_ARG_KEYS = ['context', 'screenshot', 'dom', 'console', 'network'] as const;
+export const CONTEXT_ARG_KEYS = [
+  'context',
+  'screenshot',
+  'dom',
+  'console',
+  'network',
+  'detail',
+] as const;
 
 /**
  * Tools whose reply is about a page. Bundling context onto the others - the

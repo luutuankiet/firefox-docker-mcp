@@ -151,6 +151,18 @@ export const cliOptions = {
       'Max milliseconds the auto-screenshot middleware waits for visual readiness (document loaded, body visible, viewport images decoded) before capturing. 0 disables the wait. On timeout the screenshot is taken anyway with a note about what was still pending.',
     default: Number(process.env.FIREFOX_SCREENSHOT_WAIT_MS ?? '8000'),
   },
+  screenshotMaxEdge: {
+    type: 'number',
+    description:
+      'Long-edge pixel budget for a screenshot an agent asked for by name. Image tokens are charged by area (about width x height / 750), so a 1920px capture costs ~2.5k tokens where 1024px costs ~720 and still reads every glyph on a dense page. 0 disables downscaling.',
+    default: Number(process.env.FIREFOX_SCREENSHOT_MAX_EDGE ?? '1024'),
+  },
+  screenshotAutoMaxEdge: {
+    type: 'number',
+    description:
+      'Long-edge pixel budget for pictures nobody asked for: the one bundled with every mutation and the one attached to a refusal. These fire far more often than explicit captures, so they carry a smaller budget by default. 0 disables downscaling.',
+    default: Number(process.env.FIREFOX_SCREENSHOT_AUTO_MAX_EDGE ?? '800'),
+  },
   navTimeoutMs: {
     type: 'number',
     description:

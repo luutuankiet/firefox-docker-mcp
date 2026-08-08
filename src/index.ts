@@ -50,6 +50,12 @@ import { setNavTimeoutMs, DEFAULT_NAV_TIMEOUT_MS } from './utils/nav-watchdog.js
 import type { McpToolResponse } from './types/common.js';
 import { startAssetJanitor } from './utils/asset-janitor.js';
 import {
+  configureScreenshotScale,
+  resolveScreenshotEdge,
+  shrinkImageBlocks,
+  shrinkPngBase64,
+} from './utils/image-scale.js';
+import {
   tenancy,
   formatEnvelope,
   shortTabId,
@@ -471,6 +477,15 @@ function createMcpServer(): Server {
   // Captured here because `args` is shadowed inside the CallTool handler.
   const screenshotWaitMs = Math.max(0, Number(args.screenshotWaitMs ?? 8000) || 0);
 
+  // How big a picture is allowed to be by the time it reaches a reader. Set
+  // once here so every path that can emit one - the screenshot tools, the
+  // bundle attached to a mutation, the picture attached to a refusal - is
+  // answering to the same budget.
+  configureScreenshotScale({
+    explicit: Number(args.screenshotMaxEdge ?? 1024),
+    auto: Number(args.screenshotAutoMaxEdge ?? 800),
+  });
+
   // Bound the document-unloading commands so a modal the driver cannot reach
   // fails fast with a diagnostic instead of hanging every tool in the process.
   setNavTimeoutMs(Number(args.navTimeoutMs ?? DEFAULT_NAV_TIMEOUT_MS));
@@ -562,6 +577,14 @@ function createMcpServer(): Server {
     const contextOptions = resolveContextOptions(name, rawArgs, {
       isMutation: MUTATION_TOOLS.has(name),
     });
+
+    // A picture asked for by name is worth more resolution than one handed
+    // over unasked, so the two carry different budgets unless the call names a
+    // detail level of its own.
+    const screenshotEdge = resolveScreenshotEdge(
+      rawArgs.detail,
+      name === 'screenshot_page' || name === 'screenshot_by_uid' ? 'explicit' : 'auto'
+    );
     const { agent, minted, warning: agentWarning } = tenancy.resolveAgent(agentArg, agentLabel);
     const warnings: string[] = [];
     if (agentWarning) {
@@ -717,7 +740,11 @@ function createMcpServer(): Server {
           try {
             const shot = await running.screenshotTab(victim.tabId);
             if (shot) {
-              refusal.push({ type: 'image' as const, data: shot, mimeType: 'image/png' });
+              refusal.push({
+                type: 'image' as const,
+                data: shrinkPngBase64(shot, screenshotEdge),
+                mimeType: 'image/png',
+              });
             }
           } catch (shotError) {
             log(`Refusal screenshot failed for ${shortTabId(victim.tabId)}: ${shotError}`);
@@ -922,7 +949,7 @@ function createMcpServer(): Server {
                 context: structured,
               };
             }
-            return await finalize(merged);
+            return shrinkImageBlocks(await finalize(merged), screenshotEdge);
           }
         } catch (contextError) {
           log(`Context bundle failed for ${name}: ${contextError}`);
@@ -930,7 +957,7 @@ function createMcpServer(): Server {
         }
       }
 
-      return await finalize(result);
+      return shrinkImageBlocks(await finalize(result), screenshotEdge);
     } catch (error) {
       logError(`Error executing tool ${name}`, error);
       throw error;

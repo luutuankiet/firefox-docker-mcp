@@ -28,6 +28,7 @@ git push && git push --tags
 ## Index
 | Version | Date | Theme |
 |---|---|---|
+| [v0.8.0](./v0.8.0.md) | 2026-08-08 | Screenshots at the size an agent actually reads: measured legibility floor, ~4x fewer image tokens |
 | [v0.7.1](./v0.7.1.md) | 2026-08-08 | A borrowed tab is now a refusal, not a warning: fallback writes blocked, ownership visible in VNC |
 | [v0.7.0](./v0.7.0.md) | 2026-08-06 | One browser, many agents: tab tenancy, background tab operations, bulk context in every reply |
 | [v0.6.1](./v0.6.1.md) | 2026-07-30 | A "Leave page?" prompt can no longer wedge the server: pref suppression + navigation watchdog |
