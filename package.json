@@ -1,6 +1,6 @@
 {
   "name": "@luutuankiet/firefox-docker-mcp",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Firefox MCP with auto-screenshot on every mutation tool call",
   "type": "module",
   "main": "dist/index.js",
@@ -14,7 +14,7 @@
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "version": "node scripts/sync-release-version.mjs && git add packages/firefox-bridge/package.json"
+    "version": "node scripts/sync-release-version.mjs && git add packages/firefox-bridge/package.json src/config/constants.ts docker/docker-compose.yaml"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
