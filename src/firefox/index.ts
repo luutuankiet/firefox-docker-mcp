@@ -7,6 +7,7 @@ import { WebElement } from 'selenium-webdriver';
 import { FirefoxCore } from './core.js';
 import { logDebug } from '../utils/logger.js';
 import { ConsoleEvents, NetworkEvents } from './events/index.js';
+import { ContextTree } from './context-tree.js';
 import { DomInteractions } from './dom.js';
 import { PageManagement } from './pages.js';
 import { SnapshotManager, type Snapshot, type SnapshotOptions } from './snapshot/index.js';
@@ -37,6 +38,7 @@ export class FirefoxClient {
   private core: FirefoxCore;
   private consoleEvents: ConsoleEvents | null = null;
   private networkEvents: NetworkEvents | null = null;
+  private contextTree: ContextTree | null = null;
   private dom: DomInteractions | null = null;
   private pages: PageManagement | null = null;
   private snapshot: SnapshotManager | null = null;
@@ -84,6 +86,13 @@ export class FirefoxClient {
         onNavigate,
         autoClearOnNavigate: false,
       });
+
+      // Records which tab each browsing context sits under, so an entry logged
+      // by an iframe or by a popup can be attributed to the tab responsible for
+      // it rather than discarded for having a different context id.
+      this.contextTree = new ContextTree(driver as any, (method, params = {}) =>
+        this.core.sendBiDiCommand(method, params)
+      );
     }
 
     // Initialize DOM with UID resolver callback
@@ -120,6 +129,22 @@ export class FirefoxClient {
         this.networkEvents = null;
       }
     }
+    if (this.contextTree) {
+      try {
+        await this.contextTree.subscribe();
+      } catch {
+        logDebug('Context tree unavailable (BiDi not supported by this Firefox session)');
+        this.contextTree = null;
+      }
+    }
+  }
+
+  /**
+   * Topology of the browser's contexts, for callers that need to know which tab
+   * a logged entry belongs to. Null when BiDi is unavailable.
+   */
+  getContextTree(): ContextTree | null {
+    return this.contextTree;
   }
 
   // ============================================================================
@@ -232,13 +257,13 @@ export class FirefoxClient {
     return this.consoleEvents.getMessages();
   }
 
-  clearConsoleMessages(): void {
+  clearConsoleMessages(shouldClear?: (message: ConsoleMessage) => boolean): number {
     if (!this.consoleEvents) {
       throw new Error(
         'Console events not available (Firefox Remote Agent not running — start Firefox with --remote-debugging-port to enable BiDi)'
       );
     }
-    this.consoleEvents.clearMessages();
+    return this.consoleEvents.clearMessages(shouldClear);
   }
 
   // ============================================================================

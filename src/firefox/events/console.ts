@@ -107,10 +107,20 @@ export class ConsoleEvents {
   }
 
   /**
-   * Clear console messages (e.g., on navigation)
+   * Drop console messages and report how many went.
+   *
+   * The predicate exists so one agent can clear its own tab without wiping the
+   * buffer every other agent in the shared browser is reading from.
    */
-  clearMessages(): void {
-    this.consoleMessages = [];
+  clearMessages(shouldClear?: (message: ConsoleMessage) => boolean): number {
+    if (!shouldClear) {
+      const cleared = this.consoleMessages.length;
+      this.consoleMessages = [];
+      return cleared;
+    }
+    const before = this.consoleMessages.length;
+    this.consoleMessages = this.consoleMessages.filter((message) => !shouldClear(message));
+    return before - this.consoleMessages.length;
   }
 
   /**

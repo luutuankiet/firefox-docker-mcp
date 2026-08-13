@@ -24,6 +24,12 @@ export interface ConsoleMessage {
   timestamp: number;
   source?: string;
   args?: unknown[];
+  /**
+   * The browsing context that logged the message. Present since the capture
+   * layer started recording it; leaving it off the type is what kept the tools
+   * from filtering on something they were already being handed.
+   */
+  context?: string;
 }
 
 /**

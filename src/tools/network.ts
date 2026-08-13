@@ -10,11 +10,14 @@ import {
   truncateHeaders,
 } from '../utils/response-helpers.js';
 import type { McpToolResponse } from '../types/common.js';
+import { scopeEntries, hiddenNote, SCOPE_SCHEMA_PROPERTY, type ScopeMode } from '../tab-scope.js';
+import { tabName } from '../tenancy.js';
 
 // Tool definitions
 export const listNetworkRequestsTool = {
   name: 'list_network_requests',
-  description: 'List network requests. Returns IDs for get_network_request.',
+  description:
+    'List network requests made by your tab, its frames, and windows it opened. Returns IDs for get_network_request.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -69,6 +72,7 @@ export const listNetworkRequestsTool = {
         enum: ['text', 'json'],
         description: 'Output format (default: text)',
       },
+      ...SCOPE_SCHEMA_PROPERTY,
     },
   },
 };
@@ -112,6 +116,8 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
       sortBy = 'timestamp',
       detail = 'summary',
       format = 'text',
+      tab,
+      scope = 'tab',
     } = (args as {
       limit?: number;
       sinceMs?: number;
@@ -125,12 +131,22 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
       sortBy?: 'timestamp' | 'duration' | 'status';
       detail?: 'summary' | 'min' | 'full';
       format?: 'text' | 'json';
+      tab?: string;
+      scope?: ScopeMode;
     }) || {};
 
     const { getFirefox } = await import('../index.js');
     const firefox = await getFirefox();
 
-    let requests = await firefox.getNetworkRequests();
+    const buffer = (await firefox.getNetworkRequests()) as any[];
+
+    // The buffer holds every tab in a browser shared by several agents, so the
+    // caller's own traffic has to be selected before any of the other filters
+    // run; otherwise a limit of 8 is 8 rows of somebody else's page.
+    const tree = typeof (firefox as any).getContextTree === 'function' ? (firefox as any).getContextTree() : null;
+    const scoped = scopeEntries(buffer, scope === 'all' ? null : tab ?? null, tree);
+    const withheld = hiddenNote(scoped);
+    let requests = scoped.kept;
 
     // Apply time filter
     if (sinceMs !== undefined) {
@@ -183,6 +199,13 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
     const limitedRequests = requests.slice(0, limit);
     const hasMore = requests.length > limit;
 
+    // Which tab a row belongs to is the one thing a shared buffer cannot be read
+    // without, so every output shape carries it.
+    const owner = (req: any) => ({
+      tab: req.tabRoot ? tabName(req.tabRoot) : null,
+      via: req.tabRelation === 'popup' ? 'popup' : null,
+    });
+
     // Format output based on detail level and format
     if (format === 'json') {
       // JSON format - return structured data based on detail level
@@ -190,6 +213,8 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
         total: requests.length,
         showing: limitedRequests.length,
         hasMore,
+        scope,
+        hidden: withheld,
         requests: [],
       };
 
@@ -203,6 +228,7 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
           resourceType: req.resourceType,
           isXHR: req.isXHR,
           duration: req.timings?.duration,
+          ...owner(req),
         }));
       } else {
         // Full detail - apply header truncation to prevent token overflow
@@ -217,6 +243,7 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
           timings: req.timings || null,
           requestHeaders: truncateHeaders(req.requestHeaders),
           responseHeaders: truncateHeaders(req.responseHeaders),
+          ...owner(req),
         }));
       }
 
@@ -225,15 +252,27 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
 
     // Text format (default)
     if (detail === 'summary') {
+      let sawPopup = false;
       const formattedRequests = limitedRequests.map((req) => {
         const statusInfo = req.status
           ? `[${req.status}${req.statusText ? ' ' + req.statusText : ''}]`
           : '[pending]';
-        return `${req.id} | ${req.method} ${req.url} ${statusInfo}${req.isXHR ? ' (XHR)' : ''}`;
+        // Under tab scope every row is the caller's, so only popups need a mark.
+        // Listing the whole browser is where a row is meaningless without a name.
+        let mark = '';
+        if (req.tabRelation === 'popup') {
+          sawPopup = true;
+          mark = '↗ ';
+        } else if (scope === 'all' && req.tabRoot) {
+          mark = `[${tabName(req.tabRoot)}] `;
+        }
+        return `${req.id} | ${mark}${req.method} ${req.url} ${statusInfo}${req.isXHR ? ' (XHR)' : ''}`;
       });
 
       const header = `📡 ${requests.length} requests${hasMore ? ` (limit ${limit})` : ''}\n`;
-      return successResponse(header + formattedRequests.join('\n'));
+      const footer =
+        (sawPopup ? `\n↗ = a window your tab opened` : '') + (withheld ? `\n${withheld}` : '');
+      return successResponse(header + formattedRequests.join('\n') + footer);
     } else if (detail === 'min') {
       // Compact JSON
       const minData = limitedRequests.map((req) => ({
@@ -245,12 +284,15 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
         resourceType: req.resourceType,
         isXHR: req.isXHR,
         duration: req.timings?.duration,
+        ...owner(req),
       }));
 
       return jsonResponse({
         total: requests.length,
         showing: minData.length,
         hasMore: hasMore,
+        scope,
+        hidden: withheld,
         requests: minData,
       });
     } else {
@@ -266,12 +308,15 @@ export async function handleListNetworkRequests(args: unknown): Promise<McpToolR
         timings: req.timings || null,
         requestHeaders: truncateHeaders(req.requestHeaders),
         responseHeaders: truncateHeaders(req.responseHeaders),
+        ...owner(req),
       }));
 
       return jsonResponse({
         total: requests.length,
         showing: fullData.length,
         hasMore: hasMore,
+        scope,
+        hidden: withheld,
         requests: fullData,
       });
     }

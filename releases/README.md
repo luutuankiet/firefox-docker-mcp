@@ -36,6 +36,7 @@ real release's workflow too. Push one tag, by name.
 ## Index
 | Version | Date | Theme |
 |---|---|---|
+| [v0.10.0](./v0.10.0.md) | 2026-08-14 | Your tab's logs, and only your tab's: per-tab console and network scoping, iframes and popups included |
 | [v0.9.0](./v0.9.0.md) | 2026-08-08 | Tabs you can say out loud, sized the way you asked: word names as selectors, per-tab viewports with presets |
 | [v0.8.0](./v0.8.0.md) | 2026-08-08 | Screenshots at the size an agent actually reads: measured legibility floor, ~4x fewer image tokens |
 | [v0.7.1](./v0.7.1.md) | 2026-08-08 | A borrowed tab is now a refusal, not a warning: fallback writes blocked, ownership visible in VNC |

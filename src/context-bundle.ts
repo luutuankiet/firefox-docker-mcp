@@ -172,12 +172,30 @@ export function openContextWindow(): ContextWindow {
   return { startedAt: Date.now() };
 }
 
-/** Entries carry the tab they came from, when the browser reported one. */
-function inTab(entry: { context?: string }, tabId: string | null): boolean {
-  if (!tabId || !entry.context) {
-    return true;
+/**
+ * How an entry relates to the tab the call acted on.
+ *
+ * Comparing the entry's context to the tab id is not enough: an iframe is a
+ * child context and a popup is a sibling one, so a page's own activity mostly
+ * arrives under an id that is not the tab's. The tree resolves both. An entry
+ * the browser attributed to nothing is withheld rather than assumed to be ours,
+ * since in a shared browser it is as likely to belong to somebody else.
+ */
+function relationIn(
+  entry: { context?: string },
+  tabId: string | null,
+  tree: { relationTo(context: string, tabId: string): 'self' | 'popup' | null } | null
+): 'self' | 'popup' | null {
+  if (!tabId) {
+    return 'self';
   }
-  return entry.context === tabId;
+  if (!entry.context) {
+    return null;
+  }
+  if (!tree) {
+    return entry.context === tabId ? 'self' : null;
+  }
+  return tree.relationTo(entry.context, tabId);
 }
 
 function inWindow(timestamp: unknown, startedAt: number): boolean {
@@ -219,6 +237,9 @@ export async function collectContext(
   params: CollectParams
 ): Promise<{ blocks: BundleContent[]; structured: Record<string, unknown> }> {
   const { options, tabId } = params;
+  // Absent on a client that predates context tracking, and null whenever BiDi
+  // is unavailable; both cases fall back to the old equality check.
+  const tree = typeof ff.getContextTree === 'function' ? ff.getContextTree() : null;
   const cap = CAPS[options.level as Exclude<ContextLevel, 'off'>] ?? CAPS.inline;
   const blocks: BundleContent[] = [];
   const structured: Record<string, unknown> = { level: options.level };
@@ -229,9 +250,22 @@ export async function collectContext(
   if (options.console) {
     try {
       const all = (await ff.getConsoleMessages()) as any[];
-      const mine = all.filter(
-        (msg) => inWindow(msg?.timestamp, params.window.startedAt) && inTab(msg ?? {}, tabId)
-      );
+      const popups = new Set<any>();
+      let hidden = 0;
+      const mine = all.filter((msg) => {
+        if (!inWindow(msg?.timestamp, params.window.startedAt)) {
+          return false;
+        }
+        const relation = relationIn(msg ?? {}, tabId, tree);
+        if (!relation) {
+          hidden++;
+          return false;
+        }
+        if (relation === 'popup') {
+          popups.add(msg);
+        }
+        return true;
+      });
       const errors = mine.filter((msg) => msg?.level === 'error');
       const warnings = mine.filter((msg) => msg?.level === 'warn' || msg?.level === 'warning');
 
@@ -243,6 +277,8 @@ export async function collectContext(
         total: mine.length,
         errors: errors.length,
         warnings: warnings.length,
+        fromPopups: popups.size,
+        hiddenOtherTabs: hidden,
       };
 
       // At the inline level only the lines that suggest something went wrong
@@ -251,9 +287,15 @@ export async function collectContext(
       if (cap.console > 0 && shown.length > 0) {
         const lines = shown
           .slice(0, cap.console)
-          .map((msg) => `  [${msg?.level ?? 'info'}] ${String(msg?.text ?? '').slice(0, 300)}`);
+          .map(
+            (msg) =>
+              `  ${popups.has(msg) ? '↗ ' : ''}[${msg?.level ?? 'info'}] ${String(msg?.text ?? '').slice(0, 300)}`
+          );
         if (shown.length > cap.console) {
           lines.push(`  [+${shown.length - cap.console} more, use list_console_messages]`);
+        }
+        if (popups.size > 0) {
+          lines.push('  ↗ = a window this tab opened');
         }
         sections.push(`console:\n${lines.join('\n')}`);
       }
@@ -266,9 +308,22 @@ export async function collectContext(
   if (options.network) {
     try {
       const all = (await ff.getNetworkRequests()) as any[];
-      const mine = all.filter(
-        (req) => inWindow(req?.timestamp, params.window.startedAt) && inTab(req ?? {}, tabId)
-      );
+      const popups = new Set<any>();
+      let hidden = 0;
+      const mine = all.filter((req) => {
+        if (!inWindow(req?.timestamp, params.window.startedAt)) {
+          return false;
+        }
+        const relation = relationIn(req ?? {}, tabId, tree);
+        if (!relation) {
+          hidden++;
+          return false;
+        }
+        if (relation === 'popup') {
+          popups.add(req);
+        }
+        return true;
+      });
       const failed = mine.filter((req) => typeof req?.status === 'number' && req.status >= 400);
       const pending = mine.filter((req) => req?.status === undefined);
 
@@ -280,6 +335,8 @@ export async function collectContext(
         total: mine.length,
         failed: failed.length,
         pending: pending.length,
+        fromPopups: popups.size,
+        hiddenOtherTabs: hidden,
       };
 
       // Anything that failed, plus the calls a page makes on purpose. Images
@@ -293,8 +350,11 @@ export async function collectContext(
           .slice(0, cap.network)
           .map(
             (req) =>
-              `  ${req?.status ?? '···'} ${req?.method ?? 'GET'} ${String(req?.url ?? '').slice(0, 160)}`
+              `  ${popups.has(req) ? '↗ ' : ''}${req?.status ?? '···'} ${req?.method ?? 'GET'} ${String(req?.url ?? '').slice(0, 160)}`
           );
+        if (popups.size > 0) {
+          lines.push('  ↗ = a window this tab opened');
+        }
         if (notable.length > cap.network) {
           lines.push(`  [+${notable.length - cap.network} more, use list_network_requests]`);
         }

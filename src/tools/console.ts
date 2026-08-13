@@ -10,10 +10,13 @@ import {
   truncateText,
 } from '../utils/response-helpers.js';
 import type { McpToolResponse } from '../types/common.js';
+import { scopeEntries, hiddenNote, SCOPE_SCHEMA_PROPERTY, type ScopeMode } from '../tab-scope.js';
+import { tabName } from '../tenancy.js';
 
 export const listConsoleMessagesTool = {
   name: 'list_console_messages',
-  description: 'List console messages. Supports filtering by level, time, text, source.',
+  description:
+    'List console messages from your tab, its frames, and windows it opened. Supports filtering by level, time, text, source.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -43,16 +46,20 @@ export const listConsoleMessagesTool = {
         enum: ['text', 'json'],
         description: 'Output format (default: text)',
       },
+      ...SCOPE_SCHEMA_PROPERTY,
     },
   },
 };
 
 export const clearConsoleMessagesTool = {
   name: 'clear_console_messages',
-  description: 'Clear collected console messages.',
+  description:
+    'Clear collected console messages for your tab. Use scope:"all" to clear the whole shared buffer, which affects every agent.',
   inputSchema: {
     type: 'object',
-    properties: {},
+    properties: {
+      ...SCOPE_SCHEMA_PROPERTY,
+    },
   },
 };
 
@@ -75,6 +82,8 @@ export async function handleListConsoleMessages(args: unknown): Promise<McpToolR
       textContains,
       source,
       format = 'text',
+      tab,
+      scope = 'tab',
     } = (args as {
       level?: string;
       limit?: number;
@@ -82,13 +91,22 @@ export async function handleListConsoleMessages(args: unknown): Promise<McpToolR
       textContains?: string;
       source?: string;
       format?: 'text' | 'json';
+      tab?: string;
+      scope?: ScopeMode;
     }) || {};
 
     const { getFirefox } = await import('../index.js');
     const firefox = await getFirefox();
 
-    let messages = await firefox.getConsoleMessages();
-    const totalCount = messages.length;
+    const buffer = (await firefox.getConsoleMessages()) as any[];
+    const totalCount = buffer.length;
+
+    // The buffer is browser-wide and shared, so what an agent may see is decided
+    // here rather than left to whatever the browser happened to log.
+    const tree = typeof (firefox as any).getContextTree === 'function' ? (firefox as any).getContextTree() : null;
+    const scoped = scopeEntries(buffer, scope === 'all' ? null : tab ?? null, tree);
+    let messages = scoped.kept;
+    const withheld = hiddenNote(scoped);
 
     // Apply filters
     if (level) {
@@ -141,6 +159,8 @@ export async function handleListConsoleMessages(args: unknown): Promise<McpToolR
           total: totalCount,
           filtered: 0,
           showing: 0,
+          scope,
+          hidden: withheld,
           filters: filterInfo.length > 0 ? filterInfo.join(', ') : null,
           messages: [],
         });
@@ -148,7 +168,8 @@ export async function handleListConsoleMessages(args: unknown): Promise<McpToolR
 
       return successResponse(
         `No console messages found matching filters.\n` +
-          `Total messages: ${totalCount}${filterInfo.length > 0 ? `, Filters: ${filterInfo.join(', ')}` : ''}`
+          `Total messages: ${totalCount}${filterInfo.length > 0 ? `, Filters: ${filterInfo.join(', ')}` : ''}` +
+          (withheld ? `\n${withheld}` : '')
       );
     }
 
@@ -173,12 +194,16 @@ export async function handleListConsoleMessages(args: unknown): Promise<McpToolR
         filtered: filteredCount,
         showing: messages.length,
         hasMore: truncated,
+        scope,
+        hidden: withheld,
         filters: filterInfo.length > 0 ? filterInfo.join(', ') : null,
         messages: messages.map((msg) => ({
           level: msg.level,
           text: msg.text,
           source: msg.source || null,
           timestamp: msg.timestamp || null,
+          tab: msg.tabRoot ? tabName(msg.tabRoot) : null,
+          via: msg.tabRelation === 'popup' ? 'popup' : null,
         })),
       });
     }
@@ -208,17 +233,36 @@ export async function handleListConsoleMessages(args: unknown): Promise<McpToolR
     }
     output += '\n';
 
+    let sawPopup = false;
     for (const msg of messages) {
       const emoji = LEVEL_EMOJI[msg.level.toLowerCase()] || '📝';
       const timestamp = msg.timestamp ? new Date(msg.timestamp).toISOString() : '';
       const source = msg.source ? ` [${msg.source}]` : '';
       const time = timestamp ? `[${timestamp}] ` : '';
+      // Under tab scope every row is the caller's, so only the popup rows need
+      // marking. Listing the whole browser is the case where a row is useless
+      // without knowing whose tab it came from.
+      let owner = '';
+      if (msg.tabRelation === 'popup') {
+        sawPopup = true;
+        owner = '↗ ';
+      } else if (scope === 'all' && msg.tabRoot) {
+        owner = `[${tabName(msg.tabRoot)}] `;
+      }
 
-      output += `${emoji} ${time}${msg.level.toUpperCase()}${source}: ${msg.text}\n`;
+      output += `${emoji} ${owner}${time}${msg.level.toUpperCase()}${source}: ${msg.text}\n`;
+    }
+
+    if (sawPopup) {
+      output += `\n↗ = a window your tab opened`;
     }
 
     if (truncated) {
       output += `\n[+${filteredCount - messages.length} more]`;
+    }
+
+    if (withheld) {
+      output += `\n${withheld}`;
     }
 
     return successResponse(output);
@@ -227,15 +271,38 @@ export async function handleListConsoleMessages(args: unknown): Promise<McpToolR
   }
 }
 
-export async function handleClearConsoleMessages(_args: unknown): Promise<McpToolResponse> {
+export async function handleClearConsoleMessages(args: unknown): Promise<McpToolResponse> {
   try {
+    const { tab, scope = 'tab' } = (args as { tab?: string; scope?: ScopeMode }) || {};
+
     const { getFirefox } = await import('../index.js');
     const firefox = await getFirefox();
 
-    const count = (await firefox.getConsoleMessages()).length;
-    firefox.clearConsoleMessages();
+    // Clearing the whole buffer in a browser several agents are reading from
+    // destroys evidence that is not the caller's to destroy, so it has to be
+    // asked for rather than arrived at by leaving an argument off.
+    if (scope === 'all') {
+      const count = firefox.clearConsoleMessages();
+      return successResponse(`✅ cleared ${count} messages (every tab in the shared browser)`);
+    }
 
-    return successResponse(`✅ cleared ${count} messages`);
+    if (!tab) {
+      // Falling back to a full wipe here would let a caller who named no tab
+      // destroy every other agent's evidence by accident.
+      return successResponse(
+        'No tab resolved, so nothing was cleared. Name a tab, or pass scope:"all" to clear the whole shared buffer.'
+      );
+    }
+
+    const tree = typeof (firefox as any).getContextTree === 'function' ? (firefox as any).getContextTree() : null;
+    const count = firefox.clearConsoleMessages((message) => {
+      if (!message.context) {
+        return false;
+      }
+      return tree ? tree.relationTo(message.context, tab) !== null : message.context === tab;
+    });
+
+    return successResponse(`✅ cleared ${count} messages from ${tabName(tab)}`);
   } catch (error) {
     return errorResponse(error as Error);
   }
