@@ -40,6 +40,13 @@ services:
       MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: "1"
       FF_PREF_MARIONETTE_PORT: "marionette.port=2828"
       FF_PREF_MARIONETTE_ENABLED: "marionette.enabled=${FF_DEV_MARIONETTE:-true}"
+      # Redirect window.open() popups into ordinary tabs. On a single-canvas VNC
+      # browser a real popup window renders undecorated and full-screen (openbox
+      # maximizes it and strips the titlebar), leaving the human no way to close
+      # it. As a tab it is clickable in the tab strip, and the OAuth handoff
+      # survives: window.opener, postMessage and window.close() all still work.
+      FF_PREF_LINK_NEWWINDOW: "browser.link.open_newwindow=3"
+      FF_PREF_LINK_NEWWINDOW_RESTRICTION: "browser.link.open_newwindow.restriction=0"
       KEEP_APP_RUNNING: "1"
     volumes:
       - firefox-dev-config:/config:rw
