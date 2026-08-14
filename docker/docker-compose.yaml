@@ -78,8 +78,8 @@ services:
       context: .
       dockerfile: Dockerfile.prod
       args:
-        MCP_VERSION: ${MCP_VERSION:-0.10.1}
-    image: firefox-docker-mcp:${MCP_VERSION:-0.10.1}
+        MCP_VERSION: ${MCP_VERSION:-0.10.2}
+    image: firefox-docker-mcp:${MCP_VERSION:-0.10.2}
     container_name: firefox-mcp
     depends_on:
       - firefox
