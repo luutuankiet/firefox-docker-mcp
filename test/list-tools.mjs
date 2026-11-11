@@ -44,7 +44,7 @@ send({ jsonrpc: '2.0', method: 'notifications/initialized' });
 const res = await rpc(2, 'tools/list', {});
 const names = (res.result?.tools ?? []).map((t) => t.name);
 
-const need = ['connect_host_network', 'disconnect_host_network'];
+const need = ['connect_host_network', 'disconnect_host_network', 'extract_images'];
 const missing = need.filter((n) => !names.includes(n));
 if (missing.length) fail('missing tools: ' + missing.join(', ') + ' | got ' + names.length + ' tools');
 
