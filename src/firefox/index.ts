@@ -293,8 +293,11 @@ export class FirefoxClient {
   // cannot address tabs this way; callers fall back to the classic methods.
   // ============================================================================
 
-  private bidi = (method: string, params: Record<string, any> = {}): Promise<any> =>
-    this.core.sendBiDiCommand(method, params);
+  private bidi = (
+    method: string,
+    params: Record<string, any> = {},
+    timeoutMs?: number
+  ): Promise<any> => this.core.sendBiDiCommand(method, params, timeoutMs);
 
   /**
    * Which tab the browser is currently showing.

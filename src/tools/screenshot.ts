@@ -213,7 +213,8 @@ async function bidiOnly<T>(option: string, run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    if (isBiDiUnavailable(error)) {
+    // A timeout mentions BiDi too, but the channel works; report it as what it is.
+    if (isBiDiUnavailable(error) && !/BiDi command timeout/.test(String(error))) {
       throw new Error(
         `${option} needs WebDriver BiDi, which is not working on this connection (${
           (error as Error).message
@@ -245,7 +246,10 @@ async function resolveSelector(
 /** A file name the server is willing to write: base name only, safe characters, our extension. */
 function safeFileName(saveTo: string, format: ImageFormat): string {
   const base = basename(saveTo).replace(/[^A-Za-z0-9._-]/g, '');
-  const stem = base.slice(0, base.length - extname(base).length).replace(/^\.+/, '');
+  const stem = base
+    .slice(0, base.length - extname(base).length)
+    .replace(/^\.+/, '')
+    .slice(0, 100);
   const ext = format === 'jpeg' ? '.jpg' : '.png';
   return `${stem || 'screenshot'}${ext}`;
 }

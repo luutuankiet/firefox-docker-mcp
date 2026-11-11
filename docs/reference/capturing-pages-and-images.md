@@ -69,12 +69,12 @@ Read-only, never raises the tab, writes nothing into the page.
 | `source: original` | the page's own bytes: `img` and `background` fetched from their URL; WebP, AVIF and SVG files redrawn to PNG; inline `svg` rasterised at `scale` (default 2, max 8) over white; `canvas` read with `toDataURL` |
 | `source: rendered` | the original could not be read (cross-origin without CORS, a tainted canvas, a decode error), so the element was photographed instead, as `screenshot_by_uid` would |
 
-Only PNG, JPEG or GIF ever leaves the tool. Indexes are not stable across page changes;
+Only PNG or JPEG ever leaves the tool; a GIF is redrawn as PNG so it can be downscaled. Indexes are not stable across page changes;
 the `src=` in each picked line is there so the caller can check it got the image it meant.
 
 "Original" describes where the pixels came from, not their size: picked PNG and JPEG
 blocks go through the same downscale as screenshots (see
-[Screenshot token budget](screenshot-token-budget.md)). GIF blocks are not downscaled.
+[Screenshot token budget](screenshot-token-budget.md)).
 
 ## `saveTo` writes a short-lived copy on the server
 

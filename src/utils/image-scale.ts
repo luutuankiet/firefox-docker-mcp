@@ -40,7 +40,7 @@ export const DETAIL_EDGES: Record<ScreenshotDetail, number> = {
   low: 640, // ~280 tokens - layout, buttons, headings
   medium: 1024, // ~720 tokens - all body text, including 8px metadata
   high: 1568, // ~1700 tokens - the practical ceiling
-  full: 0, // no downscale
+  full: 0, // no budget; only the 8000px API limit applies
 };
 
 const DETAILS = new Set<string>(Object.keys(DETAIL_EDGES));
@@ -120,7 +120,7 @@ function targetSize(
 ): { width: number; height: number } | null {
   const tall = height > width * 2;
   const governing = tall ? width : Math.max(width, height);
-  let scale = governing > maxEdge ? maxEdge / governing : 1;
+  let scale = maxEdge > 0 && governing > maxEdge ? maxEdge / governing : 1;
   const longest = Math.max(width, height) * scale;
   if (longest > MAX_SIDE) {
     scale = MAX_SIDE / Math.max(width, height);
@@ -182,15 +182,26 @@ function boxScale(src: Rgba, dw: number, dh: number): Rgba {
 
 /**
  * Shrink a base64 PNG to fit `maxEdge` (see `targetSize` for which edge).
- * Returns the input unchanged when the picture is already small enough, when
- * downscaling is switched off, or when anything at all goes wrong.
+ * A `maxEdge` of 0 switches the budget off but keeps the MAX_SIDE guard.
+ * Returns the input unchanged when the picture is already small enough or
+ * when anything at all goes wrong.
  */
 export function shrinkPngBase64(base64Png: string, maxEdge: number): string {
-  if (!base64Png || maxEdge <= 0) {
+  if (!base64Png) {
     return base64Png;
   }
   try {
-    const png = PNG.sync.read(Buffer.from(base64Png, 'base64'));
+    const bytes = Buffer.from(base64Png, 'base64');
+    // With the budget off, only the MAX_SIDE guard applies; the header says
+    // whether it is needed without decoding the whole picture.
+    if (maxEdge <= 0 && bytes.length >= 24) {
+      const w = bytes.readUInt32BE(16);
+      const h = bytes.readUInt32BE(20);
+      if (w <= MAX_SIDE && h <= MAX_SIDE) {
+        return base64Png;
+      }
+    }
+    const png = PNG.sync.read(bytes);
     const size = targetSize(png.width, png.height, maxEdge);
     if (!size) {
       return base64Png;
@@ -212,7 +223,7 @@ const JPEG_REENCODE_QUALITY = 85;
  * the PNG path: any failure hands back the original.
  */
 export function shrinkJpegBase64(base64Jpeg: string, maxEdge: number): string {
-  if (!base64Jpeg || maxEdge <= 0) {
+  if (!base64Jpeg) {
     return base64Jpeg;
   }
   try {
@@ -245,7 +256,7 @@ type MaybeImageBlock = { type?: string; data?: unknown; mimeType?: unknown };
  * full resolution.
  */
 export function shrinkImageBlocks<T extends { content?: unknown }>(result: T, maxEdge: number): T {
-  if (maxEdge <= 0 || !result || !Array.isArray(result.content)) {
+  if (!result || !Array.isArray(result.content)) {
     return result;
   }
   let changed = false;

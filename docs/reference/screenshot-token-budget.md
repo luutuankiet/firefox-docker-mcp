@@ -30,7 +30,7 @@ metadata text, at each long-edge size.
 | `medium` | 1024 | ~720 | every glyph, including 7 px metadata |
 | *(auto default)* | 800 | ~440 | all 27 titles exact, domains readable |
 | `low` | 640 | ~280 | **fails by confident misreading** of proper nouns and digits (`M3` read as `M5`), not by blur. Layout only |
-| `full` | 0 | — | no downscale |
+| `full` | 0 | — | no downscale, except the 8000 px cap below |
 
 The 640 px failure is the dangerous kind: the reader does not know it is wrong.
 
@@ -66,16 +66,16 @@ unaffected.
 
 Whatever the rule, no side leaves the server longer than 8000 px (`MAX_SIDE` in
 `src/utils/image-scale.ts`): the Anthropic API rejects an image over 8000 px on either side,
-and the rejection fails the whole reply, text included. The cap only runs where the
-downscale runs: a budget of zero (`detail: 'full'`, or a flag set to `0`) skips both, so a
-full-page capture taller than 8000 px requested at `full` reaches the client uncapped. GIF
-blocks are never capped either.
+and the rejection fails the whole reply, text included. The cap holds even with a budget of
+zero (`detail: 'full'`, or a flag set to `0`): such a PNG is only decoded when its header
+says a side is over 8000 px.
 
 ## Formats
 
 PNG blocks are decoded with `pngjs`, JPEG blocks with `jpeg-js` (pure JavaScript, no native
 build) and re-encoded at quality 85; the capture's own quality setting is lost on decode.
-Any other mime type, GIF included, is returned untouched.
+Any other mime type is returned untouched. `extract_images` redraws GIFs as PNG for that
+reason, so no GIF reaches this step.
 
 Downscaling is an area average (`src/utils/image-scale.ts`); sharper kernels ring around
 glyph edges at these ratios. Every failure path returns the original bytes.

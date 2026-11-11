@@ -11,7 +11,11 @@
  * browser without the Remote Agent keeps working exactly as before.
  */
 
-export type SendBiDi = (method: string, params?: Record<string, any>) => Promise<any>;
+export type SendBiDi = (
+  method: string,
+  params?: Record<string, any>,
+  timeoutMs?: number
+) => Promise<any>;
 
 /**
  * Whether a failure means "this browser cannot do it that way" rather than
@@ -220,6 +224,8 @@ export interface CaptureOptions {
   format?: CaptureFormat;
 }
 
+const DOCUMENT_CAPTURE_TIMEOUT_MS = 30_000;
+
 /**
  * Capture a tab without focusing it. With no options this is the visible
  * viewport as PNG - the shape every existing caller relies on.
@@ -240,7 +246,10 @@ export async function screenshotContext(
   if (options.format) {
     params.format = options.format;
   }
-  const res = await sendBiDi('browsingContext.captureScreenshot', params);
+  // A whole document can be tens of megapixels; encoding it alone can outrun
+  // the default 10 s command timeout.
+  const timeoutMs = params.origin === 'document' ? DOCUMENT_CAPTURE_TIMEOUT_MS : undefined;
+  const res = await sendBiDi('browsingContext.captureScreenshot', params, timeoutMs);
   const data = res?.data;
   if (typeof data !== 'string' || data.length === 0) {
     throw new Error('captureScreenshot returned no data');

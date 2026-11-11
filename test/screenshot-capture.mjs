@@ -170,9 +170,8 @@ const CHECKS = [
     },
   },
 
-  // ---- check 5 (extract_images: inline <svg> and same-origin <canvas>) ----
-  // Belongs to the extract_images tool. Append it here as
-  // { id: 5, name: '...', async run() { ... } } using open() / call() / size().
+  // Check 5 (extract_images: inline <svg> and same-origin <canvas>) lives in
+  // test/extract-images.mjs.
 
   {
     id: 6,

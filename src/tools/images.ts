@@ -22,7 +22,7 @@ const BIDI_TIMEOUT_MS = 30_000;
 export const extractImagesTool = {
   name: 'extract_images',
   description:
-    'List the images on a page (img, inline svg, canvas, CSS background), or return the ones picked by index as image blocks. Without pick: text list only. With pick: one text line plus one PNG/JPEG/GIF image per index.',
+    'List the images on a page (img, inline svg, canvas, CSS background), or return the ones picked by index as image blocks. Without pick: text list only. With pick: one text line per index, followed by a PNG/JPEG image or, if both the original and a rendered capture failed, an error line.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -157,8 +157,8 @@ const LIST_FN = `(selector, minSize, cap) => {
 
 const PICK_FN = `async (selector, minSize, picks, scale, deadlineMs) => {
   ${ENUMERATE_SRC}
-  const all = enumerate(selector, minSize);
   const started = Date.now();
+  const all = enumerate(selector, minSize);
 
   const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -202,10 +202,12 @@ const PICK_FN = `async (selector, minSize, picks, scale, deadlineMs) => {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();
     const t = await sniff(blob);
-    if (t) {
+    // GIFs are redrawn as PNG: the server can only downscale PNG and JPEG,
+    // and an agent has no use for the animation.
+    if (t && t !== 'image/gif') {
       return { mime: t, data: await blobToDataUrl(blob.type === t ? blob : new Blob([blob], { type: t })) };
     }
-    const isSvg = /svg/.test(blob.type);
+    const isSvg = !t && /svg/.test(blob.type);
     const u = URL.createObjectURL(blob);
     try {
       return { mime: 'image/png', data: await drawToPng(u, w, h, isSvg ? scale : 1, isSvg), from: blob.type || 'unknown type' };
@@ -439,7 +441,7 @@ export async function handleExtractImages(args: unknown): Promise<McpToolRespons
 
     try {
       if (!picks) {
-        const listed = (await callInTab(firefox, tabId, LIST_FN, [sel, minSize, LIST_CAP])) as {
+        const listed = (await callInTab(firefox, tabId, LIST_FN, [sel, minSize, LIST_CAP], BIDI_TIMEOUT_MS)) as {
           total: number;
           url: string;
           items: ImageMeta[];
@@ -469,6 +471,9 @@ export async function handleExtractImages(args: unknown): Promise<McpToolRespons
       const sendBiDi = (method: string, params?: Record<string, any>) =>
         firefox.sendBiDiCommand(method, params ?? {});
 
+      // Rendered fallbacks run one after another, each with its own settle and
+      // capture; one shared budget keeps ten of them from running for minutes.
+      const fallbackDeadline = Date.now() + BIDI_TIMEOUT_MS;
       const content: McpToolResponse['content'] = [];
       for (const r of picked.results) {
         if (r.missing) {
@@ -494,7 +499,9 @@ export async function handleExtractImages(args: unknown): Promise<McpToolRespons
 
         // Cross-origin without CORS, a tainted canvas, a decode error: what the
         // person sees is still on screen, so photograph the element instead.
-        if (r.el?.sharedId) {
+        if (r.el?.sharedId && Date.now() >= fallbackDeadline) {
+          failure = `${failure}; out of time for a rendered capture, pick it again on its own`;
+        } else if (r.el?.sharedId) {
           try {
             const png = await screenshotElementRef(sendBiDi, tabId, r.el.sharedId);
             content.push({

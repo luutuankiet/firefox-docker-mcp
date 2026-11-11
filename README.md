@@ -133,7 +133,7 @@ Token-efficient inspection + motion capture, built for agents that need to recon
 |------|--------|
 | `screenshot_page` | Viewport by default. `fullPage`, `clip` (a box in document CSS pixels) or `selector` (one element), as PNG or JPEG (`format`, `quality`). A page taller than Firefox can capture in one picture is cut, and the reply says where and which `clip` gets the rest. |
 | `screenshot_by_uid` | One element, by snapshot `uid` or CSS `selector`, as PNG or JPEG. |
-| `extract_images` | Read-only. Lists the page's images (`img`, inline `svg`, `canvas`, CSS backgrounds) as text, then returns the picked ones as PNG, JPEG or GIF image blocks, labelled `original` (the page's own bytes) or `rendered` (photographed because the original could not be read). |
+| `extract_images` | Read-only. Lists the page's images (`img`, inline `svg`, `canvas`, CSS backgrounds) as text, then returns the picked ones as PNG or JPEG image blocks, labelled `original` (the page's own bytes) or `rendered` (photographed because the original could not be read). |
 
 `saveTo` on either screenshot tool writes a copy inside the server's container, under `~/.firefox-devtools-mcp/screenshots/`, which is deleted after `MCP_ASSET_TTL_MIN` minutes. Details: [Capturing pages and page images](docs/reference/capturing-pages-and-images.md).
 

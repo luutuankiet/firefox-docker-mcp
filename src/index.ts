@@ -476,7 +476,6 @@ function createMcpServer(): Server {
   ]);
 
   // Tools whose pictures were asked for by name, and so get the larger budget.
-  // `extract_images` is listed ahead of the tool itself landing.
   const EXPLICIT_PICTURE_TOOLS = new Set(['screenshot_page', 'screenshot_by_uid', 'extract_images']);
 
   // Max ms the auto-screenshot waits for visual readiness (0 = disabled).
