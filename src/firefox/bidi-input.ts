@@ -14,7 +14,7 @@
  */
 
 import { settleCompositor } from './bidi-ops.js';
-import type { SendBiDi } from './bidi-ops.js';
+import type { SendBiDi, CaptureFormat } from './bidi-ops.js';
 
 // Input sources persist across calls within a tab, so the ids are stable.
 const MOUSE = 'mcp-mouse';
@@ -280,13 +280,15 @@ export async function setFilesOnElementRef(
 export async function screenshotElementRef(
   sendBiDi: SendBiDi,
   context: string,
-  sharedId: string
+  sharedId: string,
+  format?: CaptureFormat
 ): Promise<string> {
   await settleCompositor(sendBiDi, context);
   const res = await sendBiDi('browsingContext.captureScreenshot', {
     context,
     origin: 'document',
     clip: { type: 'element', element: { sharedId } },
+    ...(format ? { format } : {}),
   });
   const data = res?.data;
   if (typeof data !== 'string' || data.length === 0) {

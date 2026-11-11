@@ -21,6 +21,7 @@
     "geckodriver": "6.0.2",
     "gifenc": "^1.0.3",
     "hyperdht": "^6.33.0",
+    "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0",
     "selenium-webdriver": "4.36.0",
     "ws": "8.18.3",

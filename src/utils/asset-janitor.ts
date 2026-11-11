@@ -6,10 +6,11 @@
  * nothing ever deleted them - a long-lived container accumulated every frame of
  * every recording it had ever made until the disk filled.
  *
- * Only directories this server owns are swept. A path the caller chose - the
- * saveTo argument on a screenshot - is deliberately left alone: naming a
- * destination is a statement that the file should outlive the call, and
- * deleting it an hour later would be a surprise.
+ * Everything the server writes lands in a directory it owns, and every one of
+ * those is swept. That includes a screenshot's `saveTo`: the caller's path is no
+ * longer honoured, only its base name, inside the screenshots folder below. The
+ * caller's path usually named a directory on the caller's own machine, which the
+ * server cannot reach, so files written there were never read and never removed.
  */
 
 import { readdir, stat, rm } from 'node:fs/promises';
@@ -18,10 +19,18 @@ import { homedir } from 'node:os';
 
 const ASSET_ROOT = join(homedir(), '.firefox-devtools-mcp');
 
-// Everything the server writes on its own initiative.
-const MANAGED_DIRS = [join(ASSET_ROOT, 'recordings'), join(ASSET_ROOT, 'output')];
+/** Where `saveTo` copies of screenshots go. */
+export const SCREENSHOT_DIR = join(ASSET_ROOT, 'screenshots');
+
+// Everything the server writes.
+const MANAGED_DIRS = [join(ASSET_ROOT, 'recordings'), join(ASSET_ROOT, 'output'), SCREENSHOT_DIR];
 
 const DEFAULT_TTL_MIN = 60;
+
+/** Minutes a written file survives; zero, negative or unparseable means cleanup is off. */
+export function assetTtlMinutes(): number {
+  return Number(process.env.MCP_ASSET_TTL_MIN ?? DEFAULT_TTL_MIN);
+}
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
 /**
@@ -70,7 +79,7 @@ async function sweepDirectory(dir: string, ttlMs: number): Promise<number> {
  * A ttl of zero turns collection off, for anyone who wants to keep the frames.
  */
 export function startAssetJanitor(
-  ttlMinutes: number = Number(process.env.MCP_ASSET_TTL_MIN ?? DEFAULT_TTL_MIN),
+  ttlMinutes: number = assetTtlMinutes(),
   log: (message: string) => void = () => {}
 ): void {
   if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0) {

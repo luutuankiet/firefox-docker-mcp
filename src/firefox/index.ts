@@ -17,6 +17,11 @@ import {
   screenshotContext,
   setViewportInContext,
   waitForContextReady,
+  locateCssInContext,
+  documentGeometryInContext,
+  type CaptureOptions,
+  type CaptureFormat,
+  type DocumentGeometry,
 } from './bidi-ops.js';
 import {
   findElementRef,
@@ -311,8 +316,26 @@ export class FirefoxClient {
     return await callFunctionInContext(this.bidi, tabId, functionDeclaration);
   }
 
-  async screenshotTab(tabId: string): Promise<string> {
-    return await screenshotContext(this.bidi, tabId);
+  async screenshotTab(tabId: string, options?: CaptureOptions): Promise<string> {
+    return await screenshotContext(this.bidi, tabId, options);
+  }
+
+  /** Shared ids of the first `max` elements matching a CSS selector, in a named tab. */
+  async locateCssInTab(tabId: string, selector: string, max: number): Promise<string[]> {
+    return await locateCssInContext(this.bidi, tabId, selector, max);
+  }
+
+  async documentGeometryInTab(tabId: string): Promise<DocumentGeometry> {
+    return await documentGeometryInContext(this.bidi, tabId);
+  }
+
+  /** Photograph one element by its BiDi shared id, without raising its tab. */
+  async screenshotElementInTab(
+    tabId: string,
+    sharedId: string,
+    format?: CaptureFormat
+  ): Promise<string> {
+    return await screenshotElementRef(this.bidi, tabId, sharedId, format);
   }
 
   async waitForTabReady(tabId: string, timeoutMs: number): Promise<string | null> {
@@ -375,9 +398,9 @@ export class FirefoxClient {
     await settleAfterAction();
   }
 
-  async screenshotUidInTab(tabId: string, uid: string): Promise<string> {
+  async screenshotUidInTab(tabId: string, uid: string, format?: CaptureFormat): Promise<string> {
     const ref = await this.uidRefInTab(tabId, uid);
-    return await screenshotElementRef(this.bidi, tabId, ref);
+    return await screenshotElementRef(this.bidi, tabId, ref, format);
   }
 
   async navigateBack(): Promise<void> {

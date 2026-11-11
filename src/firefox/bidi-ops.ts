@@ -205,12 +205,42 @@ export async function setViewportInContext(
   await sendBiDi('browsingContext.setViewport', params);
 }
 
-export async function screenshotContext(sendBiDi: SendBiDi, context: string): Promise<string> {
+/** Encoding for a capture. BiDi's quality is 0-1 and only applies to JPEG. */
+export interface CaptureFormat {
+  type: 'image/png' | 'image/jpeg';
+  quality?: number;
+}
+
+/** What to photograph. Clip boxes are in CSS pixels, relative to `origin`. */
+export interface CaptureOptions {
+  origin?: 'viewport' | 'document';
+  clip?:
+    | { type: 'box'; x: number; y: number; width: number; height: number }
+    | { type: 'element'; element: { sharedId: string } };
+  format?: CaptureFormat;
+}
+
+/**
+ * Capture a tab without focusing it. With no options this is the visible
+ * viewport as PNG - the shape every existing caller relies on.
+ */
+export async function screenshotContext(
+  sendBiDi: SendBiDi,
+  context: string,
+  options: CaptureOptions = {}
+): Promise<string> {
   await settleCompositor(sendBiDi, context);
-  const res = await sendBiDi('browsingContext.captureScreenshot', {
+  const params: Record<string, unknown> = {
     context,
-    origin: 'viewport',
-  });
+    origin: options.origin ?? 'viewport',
+  };
+  if (options.clip) {
+    params.clip = options.clip;
+  }
+  if (options.format) {
+    params.format = options.format;
+  }
+  const res = await sendBiDi('browsingContext.captureScreenshot', params);
   const data = res?.data;
   if (typeof data !== 'string' || data.length === 0) {
     throw new Error('captureScreenshot returned no data');
@@ -281,4 +311,56 @@ export async function waitForContextReady(
 
   const items = Array.isArray(pending) ? pending.join(', ') : String(pending);
   return items ? `⏳ captured before the page settled: ${items}` : null;
+}
+
+/**
+ * Find elements by CSS selector in a tab, without focusing it. Returns their
+ * BiDi shared ids in document order, at most `max` of them.
+ */
+export async function locateCssInContext(
+  sendBiDi: SendBiDi,
+  context: string,
+  selector: string,
+  max: number
+): Promise<string[]> {
+  const res = await sendBiDi('browsingContext.locateNodes', {
+    context,
+    locator: { type: 'css', value: selector },
+    maxNodeCount: max,
+  });
+  const nodes: any[] = Array.isArray(res?.nodes) ? res.nodes : [];
+  return nodes
+    .map((node) => node?.sharedId)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+}
+
+/** Document size in CSS pixels, and the device pixel ratio that turns it into capture pixels. */
+export interface DocumentGeometry {
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+}
+
+export async function documentGeometryInContext(
+  sendBiDi: SendBiDi,
+  context: string
+): Promise<DocumentGeometry> {
+  const value = (await callFunctionInContext(
+    sendBiDi,
+    context,
+    `() => {
+      const de = document.documentElement;
+      const body = document.body;
+      return {
+        width: Math.max(de ? de.scrollWidth : 0, body ? body.scrollWidth : 0),
+        height: Math.max(de ? de.scrollHeight : 0, body ? body.scrollHeight : 0),
+        devicePixelRatio: window.devicePixelRatio || 1,
+      };
+    }`
+  )) as Partial<DocumentGeometry> | null;
+  return {
+    width: Number(value?.width) || 0,
+    height: Number(value?.height) || 0,
+    devicePixelRatio: Number(value?.devicePixelRatio) || 1,
+  };
 }

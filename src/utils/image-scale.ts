@@ -26,6 +26,7 @@
  */
 
 import { PNG } from 'pngjs';
+import jpeg from 'jpeg-js';
 
 export type ScreenshotDetail = 'low' | 'medium' | 'high' | 'full';
 
@@ -90,19 +91,50 @@ export function resolveScreenshotEdge(detail: unknown, kind: 'explicit' | 'auto'
   return kind === 'explicit' ? explicitEdge : autoEdge;
 }
 
+/** Decoded pixels, four bytes per pixel. Both `pngjs` and `jpeg-js` produce this. */
+interface Rgba {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
+
+/**
+ * The size a picture should come back at, or null when it already fits.
+ *
+ * The long edge is fitted to the budget, except for pictures more than twice
+ * as tall as they are wide - a full-page capture, typically. Fitting the long
+ * edge of a 1920x15000 page to 1024 leaves it ~131px wide, which nobody can
+ * read, so those fit their width instead and let the height follow. Viewport
+ * captures and the pictures attached to mutations are never that shape, so
+ * they keep the long-edge rule.
+ */
+function targetSize(
+  width: number,
+  height: number,
+  maxEdge: number
+): { width: number; height: number } | null {
+  const tall = height > width * 2;
+  const governing = tall ? width : Math.max(width, height);
+  if (governing <= maxEdge) {
+    return null;
+  }
+  const scale = maxEdge / governing;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
 /**
  * Area-average minification. Each destination pixel is the mean of the source
  * pixels it covers, which is the correct answer for downscaling and cheap
  * enough to stay off the critical path: ~180ms for 1920x994 -> 1024x530, next
  * to a capture that already waits up to 8s for the page to settle.
  */
-function boxScale(png: PNG, maxEdge: number): PNG {
-  const sw = png.width;
-  const sh = png.height;
-  const scale = maxEdge / Math.max(sw, sh);
-  const dw = Math.max(1, Math.round(sw * scale));
-  const dh = Math.max(1, Math.round(sh * scale));
-  const out = new PNG({ width: dw, height: dh });
+function boxScale(src: Rgba, dw: number, dh: number): Rgba {
+  const sw = src.width;
+  const sh = src.height;
+  const data = new Uint8Array(dw * dh * 4);
   const xRatio = sw / dw;
   const yRatio = sh / dh;
 
@@ -120,29 +152,29 @@ function boxScale(png: PNG, maxEdge: number): PNG {
       for (let sy = y0; sy < y1; sy++) {
         let idx = (sy * sw + x0) << 2;
         for (let sx = x0; sx < x1; sx++) {
-          r += png.data[idx]!;
-          g += png.data[idx + 1]!;
-          b += png.data[idx + 2]!;
-          a += png.data[idx + 3]!;
+          r += src.data[idx]!;
+          g += src.data[idx + 1]!;
+          b += src.data[idx + 2]!;
+          a += src.data[idx + 3]!;
           n++;
           idx += 4;
         }
       }
       const o = (y * dw + x) << 2;
-      out.data[o] = r / n;
-      out.data[o + 1] = g / n;
-      out.data[o + 2] = b / n;
-      out.data[o + 3] = a / n;
+      data[o] = r / n;
+      data[o + 1] = g / n;
+      data[o + 2] = b / n;
+      data[o + 3] = a / n;
     }
   }
 
-  return out;
+  return { width: dw, height: dh, data };
 }
 
 /**
- * Shrink a base64 PNG so its long edge fits `maxEdge`. Returns the input
- * unchanged when the picture is already small enough, when downscaling is
- * switched off, or when anything at all goes wrong.
+ * Shrink a base64 PNG to fit `maxEdge` (see `targetSize` for which edge).
+ * Returns the input unchanged when the picture is already small enough, when
+ * downscaling is switched off, or when anything at all goes wrong.
  */
 export function shrinkPngBase64(base64Png: string, maxEdge: number): string {
   if (!base64Png || maxEdge <= 0) {
@@ -150,19 +182,54 @@ export function shrinkPngBase64(base64Png: string, maxEdge: number): string {
   }
   try {
     const png = PNG.sync.read(Buffer.from(base64Png, 'base64'));
-    if (Math.max(png.width, png.height) <= maxEdge) {
+    const size = targetSize(png.width, png.height, maxEdge);
+    if (!size) {
       return base64Png;
     }
-    return PNG.sync.write(boxScale(png, maxEdge), { deflateLevel: 6 }).toString('base64');
+    const scaled = boxScale(png, size.width, size.height);
+    const out = new PNG({ width: scaled.width, height: scaled.height });
+    out.data = Buffer.from(scaled.data.buffer, scaled.data.byteOffset, scaled.data.byteLength);
+    return PNG.sync.write(out, { deflateLevel: 6 }).toString('base64');
   } catch {
     return base64Png;
+  }
+}
+
+/** Quality the shrunk JPEG is re-encoded at; the capture's own setting is lost on decode. */
+const JPEG_REENCODE_QUALITY = 85;
+
+/**
+ * Shrink a base64 JPEG the same way, re-encoding at quality 85. Same rule as
+ * the PNG path: any failure hands back the original.
+ */
+export function shrinkJpegBase64(base64Jpeg: string, maxEdge: number): string {
+  if (!base64Jpeg || maxEdge <= 0) {
+    return base64Jpeg;
+  }
+  try {
+    const decoded = jpeg.decode(Buffer.from(base64Jpeg, 'base64'), {
+      useTArray: true,
+      formatAsRGBA: true,
+      // A full-page capture can reach 1920x32767 (~63 MP); the library's
+      // defaults (100 MP, 512 MB) are close enough to that to raise them.
+      maxResolutionInMP: 200,
+      maxMemoryUsageInMB: 1024,
+    });
+    const size = targetSize(decoded.width, decoded.height, maxEdge);
+    if (!size) {
+      return base64Jpeg;
+    }
+    const scaled = boxScale(decoded, size.width, size.height);
+    return jpeg.encode(scaled, JPEG_REENCODE_QUALITY).data.toString('base64');
+  } catch {
+    return base64Jpeg;
   }
 }
 
 type MaybeImageBlock = { type?: string; data?: unknown; mimeType?: unknown };
 
 /**
- * Rewrite every PNG block in a tool reply. Applied at the response boundary so
+ * Rewrite every PNG and JPEG block in a tool reply. Applied at the response boundary so
  * one rule covers the screenshot tools, the bundle attached to a mutation and
  * the picture attached to a refusal - and so a screenshot written to a file
  * with `saveTo`, which carries no image block and costs no tokens, keeps its
@@ -177,10 +244,14 @@ export function shrinkImageBlocks<T extends { content?: unknown }>(result: T, ma
     if (!block || block.type !== 'image' || typeof block.data !== 'string') {
       return block;
     }
-    if (block.mimeType !== 'image/png') {
+    let shrunk: string;
+    if (block.mimeType === 'image/png') {
+      shrunk = shrinkPngBase64(block.data, maxEdge);
+    } else if (block.mimeType === 'image/jpeg') {
+      shrunk = shrinkJpegBase64(block.data, maxEdge);
+    } else {
       return block;
     }
-    const shrunk = shrinkPngBase64(block.data, maxEdge);
     if (shrunk === block.data) {
       return block;
     }
