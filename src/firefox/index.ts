@@ -639,8 +639,12 @@ export class FirefoxClient {
    * Send raw BiDi command (for advanced operations)
    * @internal
    */
-  async sendBiDiCommand(method: string, params: Record<string, any> = {}): Promise<any> {
-    return await this.core.sendBiDiCommand(method, params);
+  async sendBiDiCommand(
+    method: string,
+    params: Record<string, any> = {},
+    timeoutMs?: number
+  ): Promise<any> {
+    return await this.core.sendBiDiCommand(method, params, timeoutMs);
   }
 
   /**

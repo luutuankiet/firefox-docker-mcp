@@ -236,6 +236,7 @@ const toolHandlers = new Map<string, (input: unknown) => Promise<McpToolResponse
   // Screenshot
   ['screenshot_page', tools.handleScreenshotPage],
   ['screenshot_by_uid', tools.handleScreenshotByUid],
+  ['extract_images', tools.handleExtractImages],
 
   // DOM query / scroll / recording (v0.2.0 max-access set)
   ['query_dom', tools.handleQueryDom],
@@ -363,6 +364,7 @@ const baseTools = [
   // Screenshot
   tools.screenshotPageTool,
   tools.screenshotByUidTool,
+  tools.extractImagesTool,
 
   // DOM query / scroll / recording (v0.2.0 max-access set)
   tools.queryDomTool,
@@ -523,6 +525,7 @@ function createMcpServer(): Server {
     'fill_form_by_uid',
     'upload_file_by_uid',
     'screenshot_by_uid',
+    'extract_images',
     'take_snapshot',
     'list_pages',
     'list_agents',

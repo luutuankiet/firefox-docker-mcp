@@ -318,7 +318,13 @@ export class FirefoxCore {
   /**
    * Send raw BiDi command and get response
    */
-  async sendBiDiCommand(method: string, params: Record<string, any> = {}): Promise<any> {
+  async sendBiDiCommand(
+    method: string,
+    params: Record<string, any> = {},
+    // Ten seconds suits commands that only read state. Work the page does on
+    // its own clock, like fetching images, passes a longer budget.
+    timeoutMs = 10000
+  ): Promise<any> {
     if (!this.driver) {
       throw new Error('Driver not connected');
     }
@@ -363,7 +369,7 @@ export class FirefoxCore {
       setTimeout(() => {
         ws.off('message', messageHandler);
         reject(new Error(`BiDi command timeout: ${method}`));
-      }, 10000);
+      }, timeoutMs);
     });
   }
 
