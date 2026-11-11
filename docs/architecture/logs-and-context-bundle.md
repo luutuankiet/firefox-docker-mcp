@@ -54,7 +54,9 @@ by the watermark, so a bundle reports only what *that* call produced, on *that* 
 channel is best-effort: a channel failure never fails the tool. The DOM digest prefers
 interactive elements and falls back to the head of the tree. Tools that already return a DOM
 or a screenshot (`take_snapshot`, `query_dom`, `screenshot_page`, `screenshot_by_uid`) do
-not duplicate it. The bundle is written into both `content` text and
+not duplicate it. `extract_images` is not context-capable at all
+(`CONTEXT_CAPABLE_TOOLS` in `src/context-bundle.ts`): its reply is the images it was asked
+for and nothing else. The bundle is written into both `content` text and
 `structuredContent.context`, because some clients render only one of them.
 
 ## The general rule

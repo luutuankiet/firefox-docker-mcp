@@ -25,7 +25,7 @@ something is implemented.
 | [Host-network bridge](../../../docs/architecture/host-network-bridge.md) | how the shared browser reaches localhost on a different machine, the firefox-bridge package, connect_host_network and disconnect_host_network, takeover, idle exit | 2026-10-03 |
 | [Console and network logs, tab scoping, and the context bundle](../../../docs/architecture/logs-and-context-bundle.md) | where console and network events are captured, how an entry is attributed to a tab including its iframes and popups, and how a tool reply gets its screenshot, DOM, console and network sections | 2026-10-03 |
 | [Tenancy, tab names and per-tab operations](../../../docs/architecture/tenancy-and-tabs.md) | how agents get ids, how tabs are claimed and named, how an agent acts on a tab without stealing focus, and where per-tab viewport lives | 2026-10-03 |
-| [Tool call pipeline](../../../docs/architecture/tool-call-pipeline.md) | where a tool gets registered, where the tab for a call is decided, where refusals, the context bundle and screenshot downscaling happen | 2026-10-03 |
+| [Tool call pipeline](../../../docs/architecture/tool-call-pipeline.md) | where a tool gets registered, where the tab for a call is decided, where refusals, the context bundle and screenshot downscaling happen | 2026-11-11 |
 
 <!-- END GENERATED INDEX -->
 

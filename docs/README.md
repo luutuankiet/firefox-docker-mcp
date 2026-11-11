@@ -19,7 +19,7 @@ something is implemented.
 | [Host-network bridge](architecture/host-network-bridge.md) | how the shared browser reaches localhost on a different machine, the firefox-bridge package, connect_host_network and disconnect_host_network, takeover, idle exit | 2026-10-03 |
 | [Console and network logs, tab scoping, and the context bundle](architecture/logs-and-context-bundle.md) | where console and network events are captured, how an entry is attributed to a tab including its iframes and popups, and how a tool reply gets its screenshot, DOM, console and network sections | 2026-10-03 |
 | [Tenancy, tab names and per-tab operations](architecture/tenancy-and-tabs.md) | how agents get ids, how tabs are claimed and named, how an agent acts on a tab without stealing focus, and where per-tab viewport lives | 2026-10-03 |
-| [Tool call pipeline](architecture/tool-call-pipeline.md) | where a tool gets registered, where the tab for a call is decided, where refusals, the context bundle and screenshot downscaling happen | 2026-10-03 |
+| [Tool call pipeline](architecture/tool-call-pipeline.md) | where a tool gets registered, where the tab for a call is decided, where refusals, the context bundle and screenshot downscaling happen | 2026-11-11 |
 
 ## Traps
 
@@ -39,8 +39,9 @@ Simply true, and expensive to re-derive.
 
 | page | summary | verified |
 |---|---|---|
+| [Capturing pages and page images](reference/capturing-pages-and-images.md) | what screenshot_page, screenshot_by_uid and extract_images can capture, where Firefox cuts a long page, what original and rendered mean, and where saveTo copies go and when they are deleted | 2026-11-11 |
 | [Deploying a release to the production stack](reference/deploying-production.md) | the order of operations that upgrades the prod server without closing the person's tabs, and how to confirm what is running | 2026-10-03 |
-| [Screenshot token budget](reference/screenshot-token-budget.md) | what a screenshot costs an agent in tokens, the measured legibility floor, and the detail levels and flags that control it | 2026-10-03 |
+| [Screenshot token budget](reference/screenshot-token-budget.md) | what a screenshot costs an agent in tokens, the measured legibility floor, the detail levels and flags that control it, and how tall, JPEG and oversized pictures are shrunk | 2026-11-11 |
 
 ## Decisions
 

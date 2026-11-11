@@ -33,8 +33,9 @@ Simply true, and expensive to re-derive.
 
 | page | summary | verified |
 |---|---|---|
+| [Capturing pages and page images](../../../docs/reference/capturing-pages-and-images.md) | what screenshot_page, screenshot_by_uid and extract_images can capture, where Firefox cuts a long page, what original and rendered mean, and where saveTo copies go and when they are deleted | 2026-11-11 |
 | [Deploying a release to the production stack](../../../docs/reference/deploying-production.md) | the order of operations that upgrades the prod server without closing the person's tabs, and how to confirm what is running | 2026-10-03 |
-| [Screenshot token budget](../../../docs/reference/screenshot-token-budget.md) | what a screenshot costs an agent in tokens, the measured legibility floor, and the detail levels and flags that control it | 2026-10-03 |
+| [Screenshot token budget](../../../docs/reference/screenshot-token-budget.md) | what a screenshot costs an agent in tokens, the measured legibility floor, the detail levels and flags that control it, and how tall, JPEG and oversized pictures are shrunk | 2026-11-11 |
 
 ## Decisions
 
