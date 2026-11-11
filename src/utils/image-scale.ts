@@ -107,7 +107,12 @@ interface Rgba {
  * read, so those fit their width instead and let the height follow. Viewport
  * captures and the pictures attached to mutations are never that shape, so
  * they keep the long-edge rule.
+ *
+ * Whatever the rule, no side leaves longer than MAX_SIDE: the Anthropic API
+ * rejects an image over 8000px on either side, which fails the whole reply.
  */
+const MAX_SIDE = 8000;
+
 function targetSize(
   width: number,
   height: number,
@@ -115,10 +120,14 @@ function targetSize(
 ): { width: number; height: number } | null {
   const tall = height > width * 2;
   const governing = tall ? width : Math.max(width, height);
-  if (governing <= maxEdge) {
+  let scale = governing > maxEdge ? maxEdge / governing : 1;
+  const longest = Math.max(width, height) * scale;
+  if (longest > MAX_SIDE) {
+    scale = MAX_SIDE / Math.max(width, height);
+  }
+  if (scale >= 1) {
     return null;
   }
-  const scale = maxEdge / governing;
   return {
     width: Math.max(1, Math.round(width * scale)),
     height: Math.max(1, Math.round(height * scale)),
