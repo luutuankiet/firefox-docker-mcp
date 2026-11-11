@@ -79,6 +79,9 @@ export {
   handleScreenshotByUid,
 } from './screenshot.js';
 
+// Image extraction (read-only)
+export { extractImagesTool, handleExtractImages } from './images.js';
+
 // Utility tools (dialogs, history, viewport)
 export {
   acceptDialogTool,
