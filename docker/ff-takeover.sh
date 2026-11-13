@@ -16,6 +16,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# The stack publishes on FF_PUBLISH_ADDR from docker/.env (loopback by default),
+# so health checks must dial that address, not a hard-coded 127.0.0.1.
+FF_PUBLISH_ADDR="$(sed -n 's/^FF_PUBLISH_ADDR=//p' docker/.env 2>/dev/null | tail -n 1)"
+HOST_ADDR="${FF_PUBLISH_ADDR:-127.0.0.1}"
+
 STACK="${STACK:-prod}"
 case "$STACK" in
   prod)
@@ -58,7 +63,7 @@ case "${1:-}" in
     echo
     echo "Automation mode (${STACK}): Marionette back on, MCP server reattached."
     echo "Health: $(curl -fsS --retry 10 --retry-delay 1 --retry-all-errors \
-      --max-time 5 "http://127.0.0.1:${MCP_PORT}/health" || echo 'not ready yet')"
+      --max-time 5 "http://${HOST_ADDR}:${MCP_PORT}/health" || echo 'not ready yet')"
     ;;
   status)
     docker inspect "$FF_CONTAINER" \

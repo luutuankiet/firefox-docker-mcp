@@ -15,7 +15,7 @@ if [ -f "$ENV_FILE" ]; then
   . "$ENV_FILE"
 fi
 
-URL="${MCP_URL:-http://127.0.0.1:8931}"
+URL="${MCP_URL:-http://${FF_PUBLISH_ADDR:-127.0.0.1}:8931}"
 TOKEN="${MCP_HTTP_TOKEN:-firefox-dev}"
 HDRS=(-H "Authorization: Bearer ${TOKEN}"
       -H 'Content-Type: application/json'

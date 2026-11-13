@@ -1,7 +1,7 @@
 ---
 title: Docker stacks, production and dev
 covers: how the browser and server containers are wired, which compose file is prod and which is dev, how the prod image gets its server version, how a person signs in to sites that block automation
-verified: 2026-10-03
+verified: 2026-11-13
 ---
 
 # Docker stacks, production and dev
@@ -28,6 +28,13 @@ VNC are published.
 
 ## Shapes that are deliberate
 
+- **Ports publish on one address, `FF_PUBLISH_ADDR`, never `0.0.0.0`.** noVNC and VNC
+  have no password, so a wildcard bind gives the signed-in browser to anyone on the same
+  LAN. The default is `127.0.0.1`; a host reached over Tailscale sets its tailnet IP in
+  `docker/.env`. The health checks in `smoke.sh`, `dev-reload.sh` and `ff-takeover.sh`
+  dial the same address, because nothing listens on loopback once it is changed. A
+  tailnet IP does not exist yet when Docker starts at boot, so that host also needs
+  `net.ipv4.ip_nonlocal_bind=1`, or the bind fails and the stack stays down.
 - **Only the namespace owner may declare `dns:` and `ports:`.** Docker hard-errors with
   "conflicting options: dns and the network mode" if the joining service sets them. So
   `ports:` lists 8931 on the `firefox` service even though the `mcp` service binds it.

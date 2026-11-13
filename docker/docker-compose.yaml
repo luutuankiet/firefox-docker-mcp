@@ -52,13 +52,20 @@ services:
       - firefox-config:/config:rw
     shm_size: "2g"
     ports:
+      # Published on ONE address, FF_PUBLISH_ADDR from docker/.env, never 0.0.0.0:
+      # noVNC and VNC carry no password, so a wildcard bind hands the signed-in
+      # browser to anyone on the same LAN. The default is loopback; set it to the
+      # host's tailnet IP to reach the stack from the tailnet only. An address
+      # that only appears after boot (a tailnet IP) also needs
+      # net.ipv4.ip_nonlocal_bind=1 on the host, or Docker can start first, fail
+      # the bind with "cannot assign requested address" and leave this down.
       # MCP streamable-HTTP endpoint. Bound by the mcp service; published here
       # because this service owns the namespace.
-      - "8931:8931"
+      - "${FF_PUBLISH_ADDR:-127.0.0.1}:8931:8931"
       # noVNC and raw VNC, on the same host ports the retired host-networked
       # container used, so existing bookmarks keep working.
-      - "5800:5800"
-      - "5900:5900"
+      - "${FF_PUBLISH_ADDR:-127.0.0.1}:5800:5800"
+      - "${FF_PUBLISH_ADDR:-127.0.0.1}:5900:5900"
     # MagicDNS MUST come first. Docker's embedded resolver only advances to the
     # next server on SERVFAIL, and 1.1.1.1 answers *.ts.net with an
     # authoritative NXDOMAIN -- reverse these and every tailnet name silently
