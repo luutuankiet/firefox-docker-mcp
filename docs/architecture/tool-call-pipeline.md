@@ -1,7 +1,7 @@
 ---
 title: Tool call pipeline
 covers: where a tool gets registered, where the tab for a call is decided, where refusals, the context bundle and screenshot downscaling happen
-verified: 2026-11-11
+verified: 2026-11-21
 ---
 
 # Tool call pipeline
@@ -57,7 +57,9 @@ The `CallToolRequestSchema` handler starts at ~564.
    call caused.
 9. **Downscale** (~959, ~967). `shrinkImageBlocks` runs on the final result, so screenshot
    tools, `extract_images`, the bundle and the refusal picture all obey one rule. It
-   rewrites PNG and JPEG blocks only.
+   rewrites PNG and JPEG blocks only. When it shrinks an image it also rescales a
+   `textBoxes` block (text starting `{"width":`) whose size matched that image, so the
+   boxes stay in the returned image's pixels.
 
 `changesPageContent()` excludes `TAB_AGNOSTIC_TOOLS` (~539, e.g. `new_page`, whose
 resolved tab is a bystander) and the ownership tools `claim_tab` / `release_tab`.

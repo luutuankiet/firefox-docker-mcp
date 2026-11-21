@@ -27,6 +27,13 @@
 
 import { PNG } from 'pngjs';
 import jpeg from 'jpeg-js';
+import {
+  formatTextBoxes,
+  imageDimensions,
+  isTextBoxesText,
+  rescaleTextBoxes,
+  type TextBoxesPayload,
+} from './text-boxes.js';
 
 export type ScreenshotDetail = 'low' | 'medium' | 'high' | 'full';
 
@@ -260,6 +267,7 @@ export function shrinkImageBlocks<T extends { content?: unknown }>(result: T, ma
     return result;
   }
   let changed = false;
+  const resized: { before: { width: number; height: number }; after: { width: number; height: number } }[] = [];
   const content = (result.content as MaybeImageBlock[]).map((block) => {
     if (!block || block.type !== 'image' || typeof block.data !== 'string') {
       return block;
@@ -276,7 +284,37 @@ export function shrinkImageBlocks<T extends { content?: unknown }>(result: T, ma
       return block;
     }
     changed = true;
+    const before = imageDimensions(block.data, block.mimeType);
+    const after = imageDimensions(shrunk, block.mimeType);
+    if (before && after) {
+      resized.push({ before, after });
+    }
     return { ...block, data: shrunk };
   });
-  return changed ? { ...result, content } : result;
+  if (!changed) {
+    return result;
+  }
+  // Text boxes are measured in the captured image's pixels; follow the shrink.
+  const final = content.map((block) => {
+    const text = (block as { type?: string; text?: unknown }).text;
+    if (!block || block.type !== 'text' || !isTextBoxesText(text)) {
+      return block;
+    }
+    try {
+      const payload = JSON.parse(text) as TextBoxesPayload;
+      const match = resized.find(
+        (r) => r.before.width === payload.width && r.before.height === payload.height
+      );
+      if (!match) {
+        return block;
+      }
+      return {
+        ...block,
+        text: formatTextBoxes(rescaleTextBoxes(payload, match.after.width, match.after.height)),
+      };
+    } catch {
+      return block;
+    }
+  });
+  return { ...result, content: final };
 }

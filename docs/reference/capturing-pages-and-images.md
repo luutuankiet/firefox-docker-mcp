@@ -1,7 +1,7 @@
 ---
 title: Capturing pages and page images
 summary: what screenshot_page, screenshot_by_uid and extract_images can capture, where Firefox cuts a long page, what original and rendered mean, and where saveTo copies go and when they are deleted
-verified: 2026-11-11
+verified: 2026-11-21
 ---
 
 # Capturing pages and page images
@@ -75,6 +75,38 @@ the `src=` in each picked line is there so the caller can check it got the image
 "Original" describes where the pixels came from, not their size: picked PNG and JPEG
 blocks go through the same downscale as screenshots (see
 [Screenshot token budget](screenshot-token-budget.md)).
+
+## `textBoxes` returns the visible text as boxes in image pixels
+
+`textBoxes: true` on `screenshot_page` or `screenshot_by_uid` adds the visible text of the
+captured region, read from the DOM, one box per line of text:
+
+```
+{"width":1000,"height":700,"boxes":[
+{"text":"Example Domain","x":300,"y":198,"w":60,"h":24},
+...
+]}
+```
+
+- Coordinates are pixels of the image the caller receives. The page converts CSS pixels
+  with its `devicePixelRatio`, and when the inline image is downscaled
+  (`shrinkImageBlocks`, src/utils/image-scale.ts) the boxes are rescaled with it, so
+  `width` and `height` always equal the returned image.
+- Inline, the JSON is its own text block, nothing else in it, starting with `{"width":`.
+  Notes go in a separate block. Saving that block's text as `<image>.boxes.json` gives the
+  sidecar exactly.
+- With `saveTo`, the JSON is written next to the full-resolution image as
+  `<image path>.boxes.json`, and the reply names both paths. The janitor deletes it with
+  the image.
+- Words come from text nodes (open shadow roots included), measured with a Range each,
+  then merged into lines when they share a line, a block ancestor and a small gap. A word
+  is dropped when its element fails `checkVisibility`, when its centre lies outside the
+  region or outside an ancestor's overflow clip, or when another unrelated element covers
+  its centre.
+- Not included: form field values, `::before`/`::after` content, text inside iframes.
+- Caps: 30000 words scanned, 1000 boxes inline, 10000 in a sidecar. A note says when the
+  list was cut. If measuring fails the screenshot is still returned, with a note.
+- Code: src/utils/text-boxes.ts.
 
 ## `saveTo` writes a short-lived copy on the server
 

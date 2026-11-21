@@ -9,6 +9,14 @@ import { handleUidError } from '../utils/uid-helpers.js';
 import { isBiDiUnavailable, type CaptureFormat, type CaptureOptions } from '../firefox/bidi-ops.js';
 import { SCREENSHOT_DIR, assetTtlMinutes } from '../utils/asset-janitor.js';
 import type { McpToolResponse } from '../types/common.js';
+import {
+  formatTextBoxes,
+  measureTextBoxes,
+  MAX_INLINE_BOXES,
+  MAX_SIDECAR_BOXES,
+  type TextBoxesPayload,
+  type TextBoxRegion,
+} from '../utils/text-boxes.js';
 
 const SAVE_TO_SCHEMA = {
   type: 'string',
@@ -27,6 +35,12 @@ const QUALITY_SCHEMA = {
   minimum: 0,
   maximum: 1,
   description: 'JPEG quality from 0 to 1, default 0.8. Ignored for PNG.',
+} as const;
+
+const TEXT_BOXES_SCHEMA = {
+  type: 'boolean',
+  description:
+    'Also return the visible text as boxes in the pixel coordinates of the returned image: {"width","height","boxes":[{"text","x","y","w","h"}]}, one box per line of text. Inline it is a separate text block (first line starts with {"width":); with saveTo it is written next to the image as <image path>.boxes.json. Form field values, ::before/::after content and iframes are not included.',
 } as const;
 
 const SELECTOR_SCHEMA = {
@@ -63,6 +77,7 @@ export const screenshotPageTool = {
       format: FORMAT_SCHEMA,
       quality: QUALITY_SCHEMA,
       saveTo: SAVE_TO_SCHEMA,
+      textBoxes: TEXT_BOXES_SCHEMA,
     },
   },
 };
@@ -82,6 +97,7 @@ export const screenshotByUidTool = {
       format: FORMAT_SCHEMA,
       quality: QUALITY_SCHEMA,
       saveTo: SAVE_TO_SCHEMA,
+      textBoxes: TEXT_BOXES_SCHEMA,
     },
   },
 };
@@ -264,7 +280,8 @@ async function saveScreenshot(
   base64: string,
   saveTo: string,
   choice: FormatChoice,
-  notes: string[]
+  notes: string[],
+  boxes?: Measured
 ): Promise<McpToolResponse> {
   const buffer = Buffer.from(base64, 'base64');
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('.', '');
@@ -281,31 +298,86 @@ async function saveScreenshot(
   if (resolve(saveTo) !== path) {
     lines.push(`The path you gave (${saveTo}) was not used: the server writes only into its own folder.`);
   }
+  if (boxes) {
+    const sidecar = `${path}.boxes.json`;
+    const kept = capBoxes(boxes, MAX_SIDECAR_BOXES, notes);
+    await writeFile(sidecar, formatTextBoxes(kept) + '\n');
+    lines.push(`Text boxes (${kept.boxes.length}) saved on the server at ${sidecar}.`);
+  }
   return successResponse([...lines, ...notes].join('\n'));
 }
 
-function imageResponse(base64: string, mimeType: string, notes: string[]): McpToolResponse {
+function imageResponse(
+  base64: string,
+  mimeType: string,
+  notes: string[],
+  boxes?: Measured
+): McpToolResponse {
+  // Cap first: capping can add a note.
+  const kept = boxes ? capBoxes(boxes, MAX_INLINE_BOXES, notes) : undefined;
   return {
     content: [
       ...(notes.length > 0 ? [{ type: 'text' as const, text: notes.join('\n') }] : []),
+      // Its own block, nothing else in it, so it parses as JSON on its own.
+      ...(kept ? [{ type: 'text' as const, text: formatTextBoxes(kept) }] : []),
       { type: 'image', data: base64, mimeType },
     ],
   };
+}
+
+type Measured = { payload: TextBoxesPayload; truncated: boolean };
+
+function capBoxes(boxes: Measured, max: number, notes: string[]): TextBoxesPayload {
+  const all = boxes.payload.boxes;
+  if (boxes.truncated) {
+    notes.push('Text boxes: the page has more text than the server scans, so later text is missing.');
+  }
+  if (all.length <= max) {
+    return boxes.payload;
+  }
+  notes.push(`Text boxes: ${all.length} found, only the first ${max} are returned.`);
+  return { ...boxes.payload, boxes: all.slice(0, max) };
+}
+
+/**
+ * Measure text boxes right after a capture. A failure costs a note, never the
+ * screenshot.
+ */
+async function measureBoxes(
+  firefox: Firefox,
+  tab: string | undefined,
+  region: TextBoxRegion | (() => Promise<TextBoxRegion>),
+  base64: string | null,
+  choice: FormatChoice,
+  notes: string[]
+): Promise<Measured | undefined> {
+  if (!base64) {
+    return undefined;
+  }
+  try {
+    const target = bidiTarget(firefox, tab, 'textBoxes');
+    const r = typeof region === 'function' ? await region() : region;
+    return await measureTextBoxes(firefox, target, r, { base64, mimeType: choice.mimeType });
+  } catch (error) {
+    notes.push(`Text boxes could not be measured (${(error as Error).message}); the screenshot is unaffected.`);
+    return undefined;
+  }
 }
 
 function finish(
   base64: string | null,
   choice: FormatChoice,
   saveTo: string | undefined,
-  notes: string[]
+  notes: string[],
+  boxes?: Measured
 ): Promise<McpToolResponse> | McpToolResponse {
   if (!base64 || typeof base64 !== 'string') {
     throw new Error('Invalid screenshot data');
   }
   if (saveTo) {
-    return saveScreenshot(base64, saveTo, choice, notes);
+    return saveScreenshot(base64, saveTo, choice, notes, boxes);
   }
-  return imageResponse(base64, choice.mimeType, notes);
+  return imageResponse(base64, choice.mimeType, notes, boxes);
 }
 
 // ============================================================================
@@ -314,7 +386,8 @@ function finish(
 
 export async function handleScreenshotPage(args: unknown): Promise<McpToolResponse> {
   try {
-    const { saveTo, tab, fullPage, clip, selector, format, quality } = (args ?? {}) as {
+    const { saveTo, tab, fullPage, clip, selector, format, quality, textBoxes } = (args ?? {}) as {
+      textBoxes?: boolean;
       saveTo?: string;
       tab?: string;
       fullPage?: boolean;
@@ -345,6 +418,7 @@ export async function handleScreenshotPage(args: unknown): Promise<McpToolRespon
       const option = regions[0] ?? `format '${choice.format}'`;
       const notes: string[] = [];
       const target = bidiTarget(firefox, tab, option);
+      let region: TextBoxRegion = { mode: 'viewport' };
 
       const base64 = await bidiOnly(option, async () => {
         const options: CaptureOptions = choice.bidi ? { format: choice.bidi } : {};
@@ -353,6 +427,7 @@ export async function handleScreenshotPage(args: unknown): Promise<McpToolRespon
           const whole = { x: 0, y: 0, width: geometry.width, height: geometry.height };
           const { box, note } = clampBox(whole, geometry.devicePixelRatio, 'The page');
           options.origin = 'document';
+          region = { mode: 'document', ...box };
           if (note) {
             notes.push(note);
             options.clip = { type: 'box', ...box };
@@ -366,6 +441,7 @@ export async function handleScreenshotPage(args: unknown): Promise<McpToolRespon
           }
           options.origin = 'document';
           options.clip = { type: 'box', ...box };
+          region = { mode: 'document', ...box };
         } else if (selector) {
           const found = await resolveSelector(firefox, target, selector);
           if (found.note) {
@@ -373,11 +449,15 @@ export async function handleScreenshotPage(args: unknown): Promise<McpToolRespon
           }
           options.origin = 'document';
           options.clip = { type: 'element', element: { sharedId: found.sharedId } };
+          region = { mode: 'element', sharedId: found.sharedId };
         }
         return await firefox.screenshotTab(target, options);
       });
 
-      return await finish(base64, choice, saveTo, notes);
+      const boxes = textBoxes
+        ? await measureBoxes(firefox, target, region, base64, choice, notes)
+        : undefined;
+      return await finish(base64, choice, saveTo, notes, boxes);
     }
 
     // Capturing the tab by name avoids raising it. Firefox throttles rendering
@@ -404,15 +484,24 @@ export async function handleScreenshotPage(args: unknown): Promise<McpToolRespon
       base64Png = await firefox.takeScreenshotPage();
     }
 
-    return await finish(base64Png, choice, saveTo, []);
+    const notes: string[] = [];
+    const boxes = textBoxes
+      ? await measureBoxes(firefox, tab, { mode: 'viewport' }, base64Png, choice, notes)
+      : undefined;
+    return await finish(base64Png, choice, saveTo, notes, boxes);
   } catch (error) {
     return errorResponse(error as Error);
   }
 }
 
+function uidRegion(firefox: Firefox, tab: string, uid: string): () => Promise<TextBoxRegion> {
+  return async () => ({ mode: 'element', sharedId: await firefox.uidSharedIdInTab(tab, uid) });
+}
+
 export async function handleScreenshotByUid(args: unknown): Promise<McpToolResponse> {
   try {
-    const { uid, selector, saveTo, tab, format, quality } = (args ?? {}) as {
+    const { uid, selector, saveTo, tab, format, quality, textBoxes } = (args ?? {}) as {
+      textBoxes?: boolean;
       uid?: string;
       selector?: string;
       saveTo?: string;
@@ -434,14 +523,19 @@ export async function handleScreenshotByUid(args: unknown): Promise<McpToolRespo
     if (hasSelector) {
       const notes: string[] = [];
       const target = bidiTarget(firefox, tab, 'selector');
+      let sharedId = '';
       const base64 = await bidiOnly('selector', async () => {
         const found = await resolveSelector(firefox, target, selector!);
         if (found.note) {
           notes.push(found.note);
         }
+        sharedId = found.sharedId;
         return await firefox.screenshotElementInTab(target, found.sharedId, choice.bidi);
       });
-      return await finish(base64, choice, saveTo, notes);
+      const boxes = textBoxes
+        ? await measureBoxes(firefox, target, { mode: 'element', sharedId }, base64, choice, notes)
+        : undefined;
+      return await finish(base64, choice, saveTo, notes, boxes);
     }
 
     try {
@@ -452,7 +546,11 @@ export async function handleScreenshotByUid(args: unknown): Promise<McpToolRespo
         const base64 = await bidiOnly(option, () =>
           firefox.screenshotUidInTab(target, uid!, choice.bidi)
         );
-        return await finish(base64, choice, saveTo, []);
+        const notes: string[] = [];
+        const boxes = textBoxes
+          ? await measureBoxes(firefox, target, uidRegion(firefox, target, uid!), base64, choice, notes)
+          : undefined;
+        return await finish(base64, choice, saveTo, notes, boxes);
       }
 
       // Capturing the element in a named tab leaves the foreground alone. The
@@ -473,7 +571,18 @@ export async function handleScreenshotByUid(args: unknown): Promise<McpToolRespo
         base64Png = await firefox.takeScreenshotByUid(uid!);
       }
 
-      return await finish(base64Png, choice, saveTo, []);
+      const notes: string[] = [];
+      const boxes = textBoxes
+        ? await measureBoxes(
+            firefox,
+            tab,
+            () => uidRegion(firefox, bidiTarget(firefox, tab, 'textBoxes'), uid!)(),
+            base64Png,
+            choice,
+            notes
+          )
+        : undefined;
+      return await finish(base64Png, choice, saveTo, notes, boxes);
     } catch (error) {
       throw handleUidError(error as Error, uid!);
     }

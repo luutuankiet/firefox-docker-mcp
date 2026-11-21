@@ -135,7 +135,7 @@ Token-efficient inspection + motion capture, built for agents that need to recon
 | `screenshot_by_uid` | One element, by snapshot `uid` or CSS `selector`, as PNG or JPEG. |
 | `extract_images` | Read-only. Lists the page's images (`img`, inline `svg`, `canvas`, CSS backgrounds) as text, then returns the picked ones as PNG or JPEG image blocks, labelled `original` (the page's own bytes) or `rendered` (photographed because the original could not be read). |
 
-`saveTo` on either screenshot tool writes a copy inside the server's container, under `~/.firefox-devtools-mcp/screenshots/`, which is deleted after `MCP_ASSET_TTL_MIN` minutes. Details: [Capturing pages and page images](docs/reference/capturing-pages-and-images.md).
+`saveTo` on either screenshot tool writes a copy inside the server's container, under `~/.firefox-devtools-mcp/screenshots/`, which is deleted after `MCP_ASSET_TTL_MIN` minutes. `textBoxes: true` on either screenshot tool also returns the visible text as boxes in the returned image's pixels (`{"width","height","boxes":[{"text","x","y","w","h"}]}`), as its own text block or, with `saveTo`, as a `<image>.boxes.json` file beside the image. Details: [Capturing pages and page images](docs/reference/capturing-pages-and-images.md).
 
 ## Use Cases
 
