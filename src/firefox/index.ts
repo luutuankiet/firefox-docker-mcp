@@ -315,8 +315,17 @@ export class FirefoxClient {
     this.clearSnapshot(tabId);
   }
 
-  async evaluateInTab(tabId: string, functionDeclaration: string): Promise<unknown> {
-    return await callFunctionInContext(this.bidi, tabId, functionDeclaration);
+  async evaluateInTab(
+    tabId: string,
+    functionDeclaration: string,
+    args: unknown[] = []
+  ): Promise<unknown> {
+    return await callFunctionInContext(this.bidi, tabId, functionDeclaration, args);
+  }
+
+  /** The BiDi shared id of the element a snapshot uid names, in a named tab. */
+  async uidSharedIdInTab(tabId: string, uid: string): Promise<string> {
+    return await this.uidRefInTab(tabId, uid);
   }
 
   async screenshotTab(tabId: string, options?: CaptureOptions): Promise<string> {

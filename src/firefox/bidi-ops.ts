@@ -121,13 +121,15 @@ export async function navigateInContext(
 export async function callFunctionInContext(
   sendBiDi: SendBiDi,
   context: string,
-  functionDeclaration: string
+  functionDeclaration: string,
+  // BiDi local values, e.g. { type: 'string', value } or { sharedId } for an element.
+  args: unknown[] = []
 ): Promise<unknown> {
   const res = await sendBiDi('script.callFunction', {
     functionDeclaration,
     target: { context },
     awaitPromise: true,
-    arguments: [],
+    arguments: args,
     // Without an explicit depth, objects arrive as empty shells. DOM nodes stay
     // at depth zero because a serialized subtree is never what a caller wanted.
     serializationOptions: { maxObjectDepth: 10, maxDomDepth: 0 },
