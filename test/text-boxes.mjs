@@ -56,6 +56,8 @@ const FIXTURE = page(`
 <div id="card" style="position:absolute;left:500px;top:100px;width:300px;height:80px;border:1px solid #888">
   <div style="${T};left:20px;top:30px">Card text</div>
 </div>
+<div dir="rtl" style="${T};left:40px;top:600px">שלום עולם טוב</div>
+<div style="position:absolute;left:300px;top:600px;width:100px;font:20px/20px monospace">一二三四五六七八九十</div>
 <div style="height:1600px"></div>`);
 
 /** Parse the text block that holds the boxes; it must parse on its own. */
@@ -122,6 +124,11 @@ for (const dpr of [1, 2]) {
       near(g.y, 200 * s, 2 + 2 * s, 'Gamma y');
       near(g.w, 60 * s, 4 * s + 2, 'Gamma w'); // 5 monospace chars at 20px ~ 60px
       checkExclusions(p, false);
+      if (!find(p, 'שלום עולם טוב')) throw new Error(`RTL line not one box: ${JSON.stringify(p.boxes.filter((b) => b.y > 550 * s))}`);
+      const cjk = p.boxes.filter((b) => /[一-十]/.test(b.text));
+      if (cjk.length !== 2 || cjk.map((b) => b.text).join('') !== '一二三四五六七八九十' || !(cjk[1].y > cjk[0].y)) {
+        throw new Error(`wrapped CJK not two lines: ${JSON.stringify(cjk)}`);
+      }
       return `${p.boxes.length} boxes, image ${img.width}x${img.height}, Gamma ${JSON.stringify(g)}`;
     },
   });

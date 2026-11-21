@@ -38,6 +38,7 @@ real release's workflow too. Push one tag, by name.
 |---|---|---|
 | [v0.11.0](./v0.11.0.md) | 2026-11-11 | The whole page, the picture on it, and no files left behind: full-page / clip / selector / JPEG capture, `extract_images`, swept `saveTo` |
 | [v0.12.0](./v0.12.0.md) | 2026-11-21 | Screenshots that know where their words are: `textBoxes` returns visible text lines in image pixels, inline or as a `.boxes.json` sidecar |
+| [v0.12.1](./v0.12.1.md) | 2026-11-21 | Text boxes for every script: right-to-left lines merge, wrapped CJK lines all get boxes |
 | [v0.10.2](./v0.10.2.md) | 2026-08-14 | Popups open as tabs, not unclosable windows: `window.open` redirected into the tab strip on both stacks |
 | [v0.10.1](./v0.10.1.md) | 2026-08-14 | A release that says which release it is: version string and both prod compose defaults now written by the release script |
 | [v0.10.0](./v0.10.0.md) | 2026-08-14 | Your tab's logs, and only your tab's: per-tab console and network scoping, iframes and popups included |

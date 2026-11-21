@@ -132,21 +132,34 @@ const MEASURE_FN = `function (specJson, el) {
           if (scanned > ${MAX_WORDS}) { truncated = true; break; }
           range.setStart(node, m.index);
           range.setEnd(node, m.index + m[0].length);
-          const rects = range.getClientRects();
-          for (const r of rects) {
-            if (r.width <= 0 || r.height <= 0) { continue; }
-            const cx = r.left + r.width / 2;
-            const cy = r.top + r.height / 2;
-            if (cx < region.x || cy < region.y || cx > region.x + region.w || cy > region.y + region.h) { continue; }
-            const clip = clipOf(parent);
-            if (clip && (cx < clip.l || cx > clip.r || cy < clip.t || cy > clip.b)) { continue; }
-            if (pe !== 'none' && cx >= 0 && cy >= 0 && cx < vw && cy < vh) {
-              const rootNode = parent.getRootNode();
-              const hit = (rootNode && rootNode.elementFromPoint ? rootNode : document).elementFromPoint(cx, cy);
-              if (hit && hit !== parent && !hit.contains(parent) && !parent.contains(hit)) { continue; }
+          let pieces = [[m[0], range.getClientRects()]];
+          if (pieces[0][1].length > 1) {
+            // A word that wraps (CJK has no spaces): measure it per character.
+            pieces = [];
+            let off = m.index;
+            for (const ch of m[0]) {
+              range.setStart(node, off);
+              range.setEnd(node, off + ch.length);
+              pieces.push([ch, range.getClientRects()]);
+              off += ch.length;
             }
-            words.push({ t: m[0], l: r.left, tp: r.top, r: r.right, b: r.bottom, blk: blockOf(parent) });
-            break;
+          }
+          for (const [t, rects] of pieces) {
+            for (const r of rects) {
+              if (r.width <= 0 || r.height <= 0) { continue; }
+              const cx = r.left + r.width / 2;
+              const cy = r.top + r.height / 2;
+              if (cx < region.x || cy < region.y || cx > region.x + region.w || cy > region.y + region.h) { continue; }
+              const clip = clipOf(parent);
+              if (clip && (cx < clip.l || cx > clip.r || cy < clip.t || cy > clip.b)) { continue; }
+              if (pe !== 'none' && cx >= 0 && cy >= 0 && cx < vw && cy < vh) {
+                const rootNode = parent.getRootNode();
+                const hit = (rootNode && rootNode.elementFromPoint ? rootNode : document).elementFromPoint(cx, cy);
+                if (hit && hit !== parent && !hit.contains(parent) && !parent.contains(hit)) { continue; }
+              }
+              words.push({ t, l: r.left, tp: r.top, r: r.right, b: r.bottom, blk: blockOf(parent) });
+              break;
+            }
           }
         }
       }
@@ -161,9 +174,10 @@ const MEASURE_FN = `function (specJson, el) {
     if (cur) {
       const h = Math.min(cur.b - cur.tp, w.b - w.tp);
       const overlap = Math.min(cur.b, w.b) - Math.max(cur.tp, w.tp);
-      const gap = w.l - cur.r;
+      // Either side: right-to-left text runs leftwards in DOM order.
+      const gap = Math.max(w.l - cur.r, cur.l - w.r);
       if (cur.blk === w.blk && overlap >= h / 2 && gap <= 0.8 * h && gap >= -0.5 * h) {
-        cur.t += (gap > 0.15 * h ? ' ' : '') + w.t;
+        cur.t += (gap > 0.15 * h ? ' ' : '') + w.t; // DOM (logical) order, also for RTL
         cur.l = Math.min(cur.l, w.l); cur.tp = Math.min(cur.tp, w.tp);
         cur.r = Math.max(cur.r, w.r); cur.b = Math.max(cur.b, w.b);
         continue;
